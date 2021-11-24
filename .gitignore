@@ -1,0 +1,8 @@
+# Ignore everything...
+/*
+
+#...except for
+!.gitignore
+!README.md
+!meteo.asm
+!rom.bin
