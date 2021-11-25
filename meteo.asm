@@ -76,38 +76,50 @@ main:
     ; mov @R0,#$00
 
     mov R0,#tmp1
-    mov @R0,#$02
+    mov @R0,#$22
     inc R0
-    mov @R0,#$06
+    mov @R0,#$22
     inc R0
-    mov @R0,#$00
+    mov @R0,#$22
     inc R0
-    mov @R0,#$00
+    mov @R0,#$22
 
     mov R0,#tmp2
-    mov @R0,#$53
+    mov @R0,#$FD
     inc R0
-    mov @R0,#$6C
+    mov @R0,#$FF
     inc R0
-    mov @R0,#$AA
+    mov @R0,#$FF
     inc R0
-    mov @R0,#$BB
+    mov @R0,#$FF
 
     ; call load_cal_data
     ; call bmp280_compute_compensation
 
-    mov R3,#tmp1
+    ; mov R3,#tmp1
+    ; mov R4,#tmp2
+    ; call sub_32bit
+
+    mov R3,#tmp3
     mov R4,#tmp2
-    call sub_32bit
-
-    ; mov R3,#tmp3
-    ; mov R4,#tmp2
-    ; mov R5,#tmp1
-    ; call div_32bit
-
-    ; mov R4,#tmp2
-    ; mov R5,#tmp1
+    mov R5,#tmp1
     ; call check_sign
+    call div_32bit
+
+    ; mov R1,#1
+    ; mov A,R3
+    ; mov R0,A
+    ; call lcd_write
+
+    ; mov R1,#1
+    ; mov A,R4
+    ; mov R0,A
+    ; call lcd_write
+
+    ; mov R1,#1
+    ; mov A,R5
+    ; mov R0,A
+    ; call lcd_write
 
     mov R1,#1
     mov R0,#tmp1
@@ -261,46 +273,46 @@ load_cal_data:
     inc R0
     mov @R0,#$8E
 
-    mov R0,#cal_P2
-    mov @R0,#$43
-    inc R0
-    mov @R0,#$D6
+    ; mov R0,#cal_P2
+    ; mov @R0,#$43
+    ; inc R0
+    ; mov @R0,#$D6
 
-    mov R0,#cal_P3
-    mov @R0,#$D0
-    inc R0
-    mov @R0,#$0B
+    ; mov R0,#cal_P3
+    ; mov @R0,#$D0
+    ; inc R0
+    ; mov @R0,#$0B
 
-    mov R0,#cal_P4
-    mov @R0,#$27
-    inc R0
-    mov @R0,#$0B
+;     mov R0,#cal_P4
+;     mov @R0,#$27
+;     inc R0
+;     mov @R0,#$0B
 
-    mov R0,#cal_P5
-    mov @R0,#$8C
-    inc R0
-    mov @R0,#$00
+;     mov R0,#cal_P5
+;     mov @R0,#$8C
+;     inc R0
+;     mov @R0,#$00
 
-    mov R0,#cal_P6
-    mov @R0,#$F9
-    inc R0
-    mov @R0,#$FF
+;     mov R0,#cal_P6
+;     mov @R0,#$F9
+;     inc R0
+;     mov @R0,#$FF
 
-    mov R0,#cal_P7
-    mov @R0,#$8C
-    inc R0
-    mov @R0,#$3C
+;     mov R0,#cal_P7
+;     mov @R0,#$8C
+;     inc R0
+;     mov @R0,#$3C
 
-    mov R0,#cal_P8
-    mov @R0,#$F8
-    inc R0
-    mov @R0,#$C6
+;     mov R0,#cal_P8
+;     mov @R0,#$F8
+;     inc R0
+;     mov @R0,#$C6
 
-    mov R0,#cal_P9
-    mov @R0,#$70
-    inc R0
-    mov @R0,#$17
-    ret
+;     mov R0,#cal_P9
+;     mov @R0,#$70
+;     inc R0
+;     mov @R0,#$17
+;     ret
 
 ;R3 - pointer to value to be zeroed, uses R0,R3,R7
 zero_32bit:
@@ -424,7 +436,8 @@ mul_32bit_no_carry:
 
 ;R3 - pointer to remainder, R4 - pointer to divisor, R5 - pointer to dividend and result, uses ALL registers and BOTH flags
 div_32bit:
-    ; call check_sign ;Check sign of operands, complement them if needed
+
+    call check_sign ;Check sign of operands, complement them if needed
     call zero_32bit ;Clear remainder
     mov R2,#32 ;Set loop counter
     clr C ;Clear carry
@@ -449,24 +462,28 @@ div_32bit_continue:
     djnz R2,div_32bit_loop
     mov R6,#1
     call shlc_32bit ;Shift dividend one last time
-    ; jf1 div_32bit_end ;If there's no need to change sign of the result, finish
-    ; call neg_32bit ;Change sign of the result
-; div_32bit_end:
+    jf1 div_32bit_end ;If there's no need to change sign of the result, finish
+    call neg_32bit ;Change sign of the result
+div_32bit_end:
     ret
 
 ;R4 - pointer to first value, R5 - pointer to second value, F1 - sign flag, if cleared, result sign has to be changed, uses F1,R0,R4,R5
 check_sign:
     clr F1
     cpl F1 ;Set sign flag
+
+    mov A,R4
+    mov R6,A ;Preserve R4 in R6, as neg_32bit routine will destroy R4
+
     mov A,R4 ;Load pointer to first value to A
     add A,#3 ;Move pointer to MSB
     mov R0,A ;Load pointer to MSB to R0
     mov A,@R0 ;Load MSB to A
     cpl A ;Complement A
     jb7 check_sign_first_pos ;If sign bit is not set, proceed to check second value
-    >swap R4,R5
+    >swap R5,R6
     call neg_32bit
-    >swap R4,R5
+    >swap R5,R6
     cpl F1 ;Complement sign flag
 check_sign_first_pos:
     mov A,R5 ;Load pointer to second value to A
@@ -478,10 +495,14 @@ check_sign_first_pos:
     call neg_32bit
     cpl F1 ;Complement sign flag
 check_sign_done:
+    mov A,R6
+    mov R4,A ;Restore R4 value
     ret
 
 ;R5 - pointer to value to change sign of, uses R0,R1,R3,R4,R5,R7
 neg_32bit:
+    mov A,R3
+    mov R2,A ;DEBUG preserve R3
     mov R7,#4 ;Load loop counter
     mov A,R5
     mov R0,A ;Copy R5 to R0, only R0 and R1 can be used to access RAM
@@ -491,7 +512,6 @@ neg_32bit_loop:
     mov @R0,A ;Store value back in RAM
     inc R0
     djnz R7,neg_32bit_loop ;Repeat for every byte
-
     mov R3,#tmp_neg
     call zero_32bit ;Clear tmp_neg variable
     mov R0,#tmp_neg
@@ -500,6 +520,8 @@ neg_32bit_loop:
     mov R3,A ;Load pointer to value to R3
     mov R4,#tmp_neg
     call add_32bit ;Add 1 to result to finish two's complement
+    mov A,R2
+    mov R3,A ;DEBUG restore R3
     ret
 
 ;R6 - delay time in msec, uses R6,R7
