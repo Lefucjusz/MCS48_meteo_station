@@ -8,31 +8,29 @@
 
 ;Fixed purpose registers/flags
 
-;RAM variables
-tmp_mul .eq $20 ;32-bit
+;RAM variables, little endian
+cal_T1  .eq $20 ;16-bit
+cal_T2  .eq $22 ;16-bit
+cal_T3  .eq $24 ;16-bit
+cal_P1  .eq $26 ;16-bit
+cal_P2  .eq $28 ;16-bit
+cal_P3  .eq $2A ;16-bit
+cal_P4  .eq $2C ;16-bit
+cal_P5  .eq $2E ;16-bit
+cal_P6  .eq $30 ;16-bit
+cal_P7  .eq $32 ;16-bit
+cal_P8  .eq $34 ;16-bit
+cal_P9  .eq $36 ;16-bit
 
-cal_T1  .eq $24 ;16-bit
-cal_T2  .eq $26 ;16-bit
-cal_T3  .eq $28 ;16-bit
-cal_P1  .eq $2A ;16-bit
-cal_P2  .eq $2C ;16-bit
-cal_P3  .eq $2E ;16-bit
-cal_P4  .eq $30 ;16-bit
-cal_P5  .eq $32 ;16-bit
-cal_P6  .eq $34 ;16-bit
-cal_P7  .eq $36 ;16-bit
-cal_P8  .eq $38 ;16-bit
-cal_P9  .eq $3A ;16-bit
+temp_adc    .eq $38 ;32-bit
+temp_real   .eq $3C ;32-bit
+pres_adc    .eq $40 ;32-bit
+pres_real   .eq $44 ;32-bit
 
-temp_adc    .eq $3C ;32-bit
-temp_real   .eq $40 ;32-bit
-pres_adc    .eq $44 ;32-bit
-pres_real   .eq $48 ;32-bit
-
-tmp1    .eq $4C ;32-bit
-tmp2    .eq $50 ;32-bit
-tmp3    .eq $54 ;32-bit
-tmp4    .eq $58 ;32-bit
+tmp1    .eq $48 ;32-bit
+tmp2    .eq $4C ;32-bit
+tmp3    .eq $50 ;32-bit
+tmp4    .eq $54 ;32-bit
 
 ;Macros
 swap    .ma Rx,Ry ;Swaps two registers
@@ -66,60 +64,65 @@ main:
     mov R0,#' '
     call lcd_write
 
-    mov R0,#temp_adc
-    mov @R0,#$D0
+    ; mov R0,#temp_adc
+    ; mov @R0,#$D0
+    ; inc R0
+    ; mov @R0,#$EE
+    ; inc R0
+    ; mov @R0,#$07
+    ; inc R0
+    ; mov @R0,#$00
+
+    mov R0,#tmp1
+    mov @R0,#$DD
     inc R0
-    mov @R0,#$EE
+    mov @R0,#$CC
     inc R0
-    mov @R0,#$07
+    mov @R0,#$BB
+    inc R0
+    mov @R0,#$36
+
+    mov R0,#tmp2
+    mov @R0,#$03
+    inc R0
+    mov @R0,#$00
+    inc R0
+    mov @R0,#$00
     inc R0
     mov @R0,#$00
 
-    ; mov R0,#tmp1
-    ; mov @R0,#$FA
-    ; inc R0
-    ; mov @R0,#$26
-    ; inc R0
-    ; mov @R0,#$00
-    ; inc R0
-    ; mov @R0,#$00
+    ; call load_cal_data
+    ; call bmp280_compute_compensation
 
-    ; mov R0,#tmp2
-    ; mov @R0,#$43
-    ; inc R0
-    ; mov @R0,#$67
-    ; inc R0
-    ; mov @R0,#$00
-    ; inc R0
-    ; mov @R0,#$00
+    mov R3,#tmp2
+    mov R4,#tmp1
+    call sub_32bit
 
-    call load_cal_data
-    call bmp280_compute_compensation
     ; mov R3,#tmp3
-    ; mov R4,#tmp1
-    ; mov R5,#tmp2
-    ; call mul_32bit
+    ; mov R4,#tmp2
+    ; mov R5,#tmp1
+    ; call div_32bit
 
     mov R1,#1
-    mov R0,#tmp3
+    mov R0,#tmp2
     mov A,@R0
     mov R0,A
     call lcd_write
 
-    mov R0,#tmp3
+    mov R0,#tmp2
     inc R0
     mov A,@R0
     mov R0,A
     call lcd_write
 
-    mov R0,#tmp3
+    mov R0,#tmp2
     inc R0
     inc R0
     mov A,@R0
     mov R0,A
     call lcd_write
 
-    mov R0,#tmp3
+    mov R0,#tmp2
     inc R0
     inc R0
     inc R0
@@ -134,44 +137,36 @@ loop:
 ;Subroutines
 
 bmp280_compute_compensation:
-    mov R3,#tmp1
-    mov R4,#temp_adc
-    mov R6,#4
-    call copy_32bit ;Copy 4 bytes, tmp1 = temp_adc
-
-    clr F0 ;Perform signed shift
-    mov R5,#tmp1
-    mov R6,#3
-    call shr_32bit ;tmp1 = temp_adc>>3
-
-    mov R3,#tmp2
-    mov R4,#cal_T1
-    mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
-
-    mov R5,#tmp2
-    mov R6,#1
-    call shl_32bit ;tmp2 = cal_T1<<1
-    
-    mov R3,#tmp1
-    mov R4,#tmp2
-    call sub_32bit ;tmp1 = temp_adc>>3 - cal_T1<<1
-    
-    mov R3,#tmp2
-    mov R4,#cal_T2
-    mov R6,#2
-    call copy_32bit ;Copy 2 bytes, tmp2 = cal_T2
-
-    mov R3,#tmp3
-    mov R4,#tmp1
-    mov R5,#tmp2
-    call mul_32bit ;tmp3 = (temp_adc>>3 - cal_T1<<1) * cal_T2
-
-    clr F0 ;Perform signed shift
-    mov R5,#tmp3
-    mov R6,#11
-    call shr_32bit ;tmp3 = ((temp_adc>>3 - cal_T1<<1) * cal_T2) >> 11
-    ret
+    ; mov R3,#tmp1
+    ; mov R4,#temp_adc
+    ; mov R6,#4
+    ; call copy_32bit ;Copy 4 bytes, tmp1 = temp_adc
+    ; clr F0 ;Perform signed shift
+    ; mov R5,#tmp1
+    ; mov R6,#3
+    ; call shr_32bit ;tmp1 = temp_adc>>3
+    ; mov R3,#tmp2
+    ; mov R4,#cal_T1
+    ; mov R6,#2
+    ; call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
+    ; mov R5,#tmp2
+    ; mov R6,#1
+    ; call shl_32bit ;tmp2 = cal_T1<<1    
+    ; mov R3,#tmp1
+    ; mov R4,#tmp2
+    ; call sub_32bit ;tmp1 = temp_adc>>3 - cal_T1<<1    
+    ; mov R3,#tmp2
+    ; mov R4,#cal_T2
+    ; mov R6,#2
+    ; call copy_32bit ;Copy 2 bytes, tmp2 = cal_T2
+    ; mov R3,#tmp3
+    ; mov R4,#tmp1
+    ; mov R5,#tmp2
+    ; call mul_32bit ;tmp3 = (temp_adc>>3 - cal_T1<<1) * cal_T2
+    ; clr F0 ;Perform signed shift
+    ; mov R5,#tmp3
+    ; mov R6,#11
+    ; call shr_32bit ;tmp3 = ((temp_adc>>3 - cal_T1<<1) * cal_T2) >> 11
     
     ; mov R4,#tmp1
     ; mov R5,#temp_adc
@@ -301,7 +296,7 @@ load_cal_data:
     mov @R0,#$17
     ret
 
-;R3 - pointer to value to be zeroed, uses R0,R4,R7
+;R3 - pointer to value to be zeroed, uses R0,R3,R7
 zero_32bit:
     mov A,R3 ;TODO add comments
     mov R0,A
@@ -328,9 +323,10 @@ copy_32bit_loop:
     djnz R6,copy_32bit_loop
     ret
 
-;R5 - pointer to value to be shifted (LSB first), R6 - number of positions to shift left, uses R0,R5,R6,R7
+;R5 - pointer to value to be shifted, R6 - number of positions to shift left, uses R0,R5,R6,R7
 shl_32bit:
     clr C ;Clear carry bit
+shlc_32bit:
     mov R7,#4 ;Load loop counter
     mov A,R5
     mov R0,A ;Copy R5 to R0, so that R5 won't be changed in inner loop - needed to shift by multiple positions
@@ -343,9 +339,10 @@ shl_32bit_loop:
     djnz R6,shl_32bit ;Repeat the whole process required number of times
     ret
 
-;F0 - operation signedness, if set, unsigned, R5 - pointer to value to be shifted (LSB first), R6 - number of positions to shift right, uses F0,R0,R5,R6,R7
+;F0 - operation signedness, if set, unsigned, R5 - pointer to value to be shifted, R6 - number of positions to shift right, uses F0,R0,R5,R6,R7
 shr_32bit:
     clr C ;Clear carry bit
+shrc_32bit:
     mov R7,#4 ;Load loop counter
     mov A,R5 ;Load R5 to A
     add A,#3 ;Move pointer to MSB
@@ -403,7 +400,7 @@ sub_32bit_no_borrow:
     djnz R7,sub_32bit_loop
     ret
 
-;R3 - pointer to result, R4 - pointer to multiplicand, R5 - pointer to multiplier, LSB first, uses ALL registers and F0
+;R3 - pointer to result, R4 - pointer to multiplicand, R5 - pointer to multiplier, uses ALL registers and F0
 mul_32bit:
     call zero_32bit ;Clear result
     mov R2,#32 ;Set loop counter
@@ -422,7 +419,33 @@ mul_32bit_no_carry:
     djnz R2,mul_32bit_loop ;Repeat for every multiplier bit
     ret
 
-;TODO signed division
+;R3 - pointer to remainder, R4 - pointer to divisor, R5 - pointer to dividend and result
+div_32bit:
+    call zero_32bit ;Clear remainder
+    mov R2,#32 ;Set loop counter
+    clr C ;Clear carry
+    clr F0
+    cpl F0 ;Set F0 - perform unsigned right shifts
+div_32bit_loop:
+    mov R6,#1
+    call shlc_32bit ;Shift dividend left with carry
+    >swap R3,R5 ;Swap R3 and R5
+    mov R6,#1
+    call shlc_32bit ;Shift carry (MSB of dividend) into remainder
+    >swap R3,R5 ;Revert swap
+    call sub_32bit ;remainder = remainder - divisor
+    jnc div_32bit_fit ;If result positive, divisor fits into remainder
+    call add_32bit ;If result negative, restore remainder    
+    clr C ;Clear carry to be shifted into result
+    jmp div_32bit_continue
+div_32bit_fit:
+    clr C
+    cpl C ;Set carry to be shifted into result
+div_32bit_continue:
+    djnz R2,div_32bit_loop
+    mov R6,#1
+    call shlc_32bit ;Shift dividend one last time
+    ret
 
 ;R6 - delay time in msec, uses R6,R7
 delay_ms:
