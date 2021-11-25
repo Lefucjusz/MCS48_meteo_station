@@ -66,44 +66,60 @@ main:
     mov R0,#' '
     call lcd_write
 
-    ; mov R0,#temp_adc
-    ; mov @R0,#$D0
+    mov R0,#temp_adc
+    mov @R0,#$D0
+    inc R0
+    mov @R0,#$EE
+    inc R0
+    mov @R0,#$07
+    inc R0
+    mov @R0,#$00
+
+    ; mov R0,#tmp1
+    ; mov @R0,#$FA
     ; inc R0
-    ; mov @R0,#$EE
+    ; mov @R0,#$26
     ; inc R0
-    ; mov @R0,#$07
+    ; mov @R0,#$00
     ; inc R0
     ; mov @R0,#$00
 
-    mov R0,#tmp1
-    mov @R0,#$00
-    inc R0
-    mov @R0,#$00
-    inc R0
-    mov @R0,#$00
-    inc R0
-    mov @R0,#$81
+    ; mov R0,#tmp2
+    ; mov @R0,#$43
+    ; inc R0
+    ; mov @R0,#$67
+    ; inc R0
+    ; mov @R0,#$00
+    ; inc R0
+    ; mov @R0,#$00
+
+    call load_cal_data
+    call bmp280_compute_compensation
+    ; mov R3,#tmp3
+    ; mov R4,#tmp1
+    ; mov R5,#tmp2
+    ; call mul_32bit
 
     mov R1,#1
-    mov R0,#tmp2
+    mov R0,#tmp3
     mov A,@R0
     mov R0,A
     call lcd_write
 
-    mov R0,#tmp2
+    mov R0,#tmp3
     inc R0
     mov A,@R0
     mov R0,A
     call lcd_write
 
-    mov R0,#tmp2
+    mov R0,#tmp3
     inc R0
     inc R0
     mov A,@R0
     mov R0,A
     call lcd_write
 
-    mov R0,#tmp2
+    mov R0,#tmp3
     inc R0
     inc R0
     inc R0
@@ -117,9 +133,177 @@ loop:
 
 ;Subroutines
 
-;R3 - pointer to value to be zeroed, uses R0,R3,R7
+bmp280_compute_compensation:
+    mov R3,#tmp1
+    mov R4,#temp_adc
+    mov R6,#4
+    call copy_32bit ;Copy 4 bytes, tmp1 = temp_adc
+
+    clr F0 ;Perform signed shift
+    mov R5,#tmp1
+    mov R6,#3
+    call shr_32bit ;tmp1 = temp_adc>>3
+
+    mov R3,#tmp2
+    mov R4,#cal_T1
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
+
+    mov R5,#tmp2
+    mov R6,#1
+    call shl_32bit ;tmp2 = cal_T1<<1
+    
+    mov R3,#tmp1
+    mov R4,#tmp2
+    call sub_32bit ;tmp1 = temp_adc>>3 - cal_T1<<1
+    
+    mov R3,#tmp2
+    mov R4,#cal_T2
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes, tmp2 = cal_T2
+
+    mov R3,#tmp3
+    mov R4,#tmp1
+    mov R5,#tmp2
+    call mul_32bit ;tmp3 = (temp_adc>>3 - cal_T1<<1) * cal_T2
+
+    clr F0 ;Perform signed shift
+    mov R5,#tmp3
+    mov R6,#11
+    call shr_32bit ;tmp3 = ((temp_adc>>3 - cal_T1<<1) * cal_T2) >> 11
+    ret
+    
+    ; mov R4,#tmp1
+    ; mov R5,#temp_adc
+    ; mov R6,#4
+    ; call copy_mem ;Copy 4 bytes, tmp1 = temp_adc
+    ; mov R5,#tmp1
+    ; mov R6,#4
+    ; call shr_32bit ;tmp1 = temp_adc>>4
+    ; mov R4,#tmp2
+    ; mov R5,#cal_T1
+    ; mov R6,#2
+    ; call copy_mem ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
+    ; mov R4,#tmp1
+    ; mov R5,#tmp2
+    ; call sub_32bit ;tmp1 = temp_adc>>4 - cal_T1
+    ; mov R4,#tmp2
+    ; mov R5,#tmp1
+    ; mov R6,#4
+    ; call copy_mem ;Copy 4 bytes, tmp2 = tmp1 = temp_adc>>4 - cal_T1
+    ; mov R3,#tmp4
+    ; mov R4,#tmp1
+    ; mov R5,#tmp2
+    ; call mul_32bit ;tmp4 = (temp_adc>>4 - cal_T1) * (temp_adc>>4 - cal_T1)
+    ; mov R5,#tmp4
+    ; mov R6,#12
+    ; clr F0 ;Clear F0 again, it was set in mul_32bit
+    ; call shr_32bit ;tmp4 = ((temp_adc>>4 - cal_T1) * (temp_adc>>4 - cal_T1)) >> 12
+    ; mov R4,#tmp1
+    ; mov R5,#cal_T3
+    ; mov R6,#2
+    ; call copy_mem ;Copy 2 bytes - tmp1 (32-bit) = cal_T3 (16-bit)
+    ; mov R3,#tmp2
+    ; ; mov R4,#tmp1 ;R4 is already loaded with tmp1
+    ; mov R5,#tmp4
+    ; call mul_32bit ;tmp2 = (((temp_adc>>4 - cal_T1)*(temp_adc>>4 - cal_T1)) >> 12) * cal_T3
+    ; ret
+
+
+    ; mov R5,#tmp2
+    ; mov R6,#14
+    ; clr F0 ;Clear F0 again, it was set in mul_32bit
+    ; call shr_32bit ;tmp2 = ((((temp_adc>>4 - cal_T1)*(temp_adc>>4 - cal_T1)) >> 12) * cal_T3) >> 14
+    ; mov R4,#tmp3
+    ; ;mov R5,#tmp2 ;R5 is already loaded with tmp2
+    ; call add_32bit ;tmp3 = t_fine = var1 + var2, see BMP280 datasheet
+
+    ; mov R4,#tmp1
+    ; call zero_32bit
+    ; mov R0,#tmp1
+    ; mov @R0,#5 ;tmp1 = 5
+
+    ; mov R3,#temp_real
+    ; ; mov R4,#tmp1 ;R4 is already loaded with tmp1
+    ; mov R5,#tmp3
+    ; call mul_32bit ;temp_real = t_fine * 5
+
+    ; mov R4,#tmp1
+    ; call zero_32bit
+    ; mov R0,#tmp1
+    ; mov @R0,#128 ;tmp1 = 128
+
+    ; mov R4,#temp_real
+    ; mov R5,#tmp1
+    ; call add_32bit ;temp_real = t_fine * 5 + 128
+
+    ret
+
+load_cal_data:
+    mov R0,#cal_T1
+    mov @R0,#$70
+    inc R0
+    mov @R0,#$6B
+
+    mov R0,#cal_T2
+    mov @R0,#$43
+    inc R0
+    mov @R0,#$67
+
+    mov R0,#cal_T3
+    mov @R0,#$18
+    inc R0
+    mov @R0,#$FC
+
+    mov R0,#cal_P1
+    mov @R0,#$7D
+    inc R0
+    mov @R0,#$8E
+
+    mov R0,#cal_P2
+    mov @R0,#$43
+    inc R0
+    mov @R0,#$D6
+
+    mov R0,#cal_P3
+    mov @R0,#$D0
+    inc R0
+    mov @R0,#$0B
+
+    mov R0,#cal_P4
+    mov @R0,#$27
+    inc R0
+    mov @R0,#$0B
+
+    mov R0,#cal_P5
+    mov @R0,#$8C
+    inc R0
+    mov @R0,#$00
+
+    mov R0,#cal_P6
+    mov @R0,#$F9
+    inc R0
+    mov @R0,#$FF
+
+    mov R0,#cal_P7
+    mov @R0,#$8C
+    inc R0
+    mov @R0,#$3C
+
+    mov R0,#cal_P8
+    mov @R0,#$F8
+    inc R0
+    mov @R0,#$C6
+
+    mov R0,#cal_P9
+    mov @R0,#$70
+    inc R0
+    mov @R0,#$17
+    ret
+
+;R3 - pointer to value to be zeroed, uses R0,R4,R7
 zero_32bit:
-    mov A,R3
+    mov A,R3 ;TODO add comments
     mov R0,A
     mov R7,#4
     clr A
@@ -129,13 +313,13 @@ zero_32bit_loop:
     djnz R7,zero_32bit_loop
     ret
 
-;R4 - pointer to destination, R5 - pointer to source, R6 - number of bytes to copy, uses R0,R1,R4,R5,R6,R7
+;R3 - pointer to destination, R4 - pointer to source, R6 - number of bytes to copy, uses R0,R1,R4,R5,R6,R7
 copy_32bit:
     call zero_32bit
+    mov A,R3
+    mov R0,A ;Copy R3 to R0, to preserve R4, also only R0 and R1 can be used to access RAM
     mov A,R4
-    mov R0,A ;Copy R4 to R0, to preserve R4, also only R0 and R1 can be used to access RAM
-    mov A,R5
-    mov R1,A ;Copy R5 to R1, the same reason as above
+    mov R1,A ;Copy R4 to R1, the same reason as above
 copy_32bit_loop:
     mov A,@R1
     mov @R0,A ;Copy [R1] to [R0]
@@ -221,7 +405,6 @@ sub_32bit_no_borrow:
 
 ;R3 - pointer to result, R4 - pointer to multiplicand, R5 - pointer to multiplier, LSB first, uses ALL registers and F0
 mul_32bit:
-    call check_sign ;Check sign of the result and complement inputs if needed
     call zero_32bit ;Clear result
     mov R2,#32 ;Set loop counter
     clr F0
@@ -237,58 +420,6 @@ mul_32bit_no_carry:
     call shl_32bit ;Shift multiplicand 1 time left
     >swap R4,R5 ;Revert R4 and R5 to original state
     djnz R2,mul_32bit_loop ;Repeat for every multiplier bit
-    jf1 mul_32bit_end ;If there's no need to change sign of the result, finish
-    call neg_32bit ;Change sign of the result
-mul_32bit_end:
-    ret
-
-;R4 - pointer to first value, R5 - pointer to second value, F1 - sign flag, if cleared, result sign has to be changed
-check_sign:
-    clr F1
-    cpl F1 ;Set sign flag
-    mov A,R4 ;Load pointer to first value to A
-    add A,#3 ;Move pointer to MSB
-    mov R0,A ;Load pointer to MSB to R0
-    mov A,@R0 ;Load MSB to A
-    cpl A ;Complement A
-    jb7 check_sign_first_pos ;If sign bit is not set, proceed to check second value
-    inc A ;Finish two's complement
-    mov @R0,A ;Store two's complement of value back in RAM
-    cpl F1 ;Set sign flag
-check_sign_first_pos:
-    mov A,R5 ;Load pointer to second value to A
-    add A,#3 ;Move pointer to MSB
-    mov R0,A ;Load pointer to MSB to R0
-    mov A,@R0 ;Load MSB to A
-    cpl A ;Complement A
-    jb7 check_sign_done ;If sign bit is not set, finish
-    inc A ;Finish two's complement
-    mov @R0,A ;Store two's complement of value back in RAM
-    cpl F1 ;Set sign flag
-check_sign_done:
-    ret
-
-;R3 - value to change sign of, uses R0,R3,R4,R7
-neg_32bit:
-    mov R7,#4 ;Load loop counter
-    mov A,R3
-    mov R0,A ;Copy R3 to R0, only R0 and R1 can be used to access RAM
-neg_32bit_loop:
-    mov A,@R0 ;Load byte to A
-    cpl A ;Complement A
-    mov @R0,A ;Store value back in RAM
-    inc R0
-    djnz R7,neg_32bit_loop ;Repeat for every byte
-    mov A,R3
-    mov R4,A ;Preserve R3 in R4
-    mov R3,#tmp_mul
-    call zero_32bit ;Clear tmp_mul variable
-    mov R0,#tmp_mul
-    mov @R0,#1 ;tmp_mul = 1
-    mov A,R4
-    mov R3,A ;Restore R3
-    mov R4,#tmp_mul
-    call add_32bit ;Add 1 to result to finish two's complement
     ret
 
 ;TODO signed division
