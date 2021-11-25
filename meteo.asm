@@ -32,6 +32,8 @@ tmp2    .eq $4C ;32-bit
 tmp3    .eq $50 ;32-bit
 tmp4    .eq $54 ;32-bit
 
+tmp_neg .eq $58 ;32-bit
+
 ;Macros
 swap    .ma Rx,Ry ;Swaps two registers
         mov A,]1 ;Move Rx to A
@@ -74,22 +76,22 @@ main:
     ; mov @R0,#$00
 
     mov R0,#tmp1
-    mov @R0,#$DD
+    mov @R0,#$88
     inc R0
-    mov @R0,#$CC
+    mov @R0,#$66
     inc R0
-    mov @R0,#$BB
+    mov @R0,#$55
     inc R0
-    mov @R0,#$36
+    mov @R0,#$77
 
     mov R0,#tmp2
-    mov @R0,#$03
+    mov @R0,#$EE
     inc R0
-    mov @R0,#$00
+    mov @R0,#$EE
     inc R0
-    mov @R0,#$00
+    mov @R0,#$EE
     inc R0
-    mov @R0,#$00
+    mov @R0,#$EE
 
     ; call load_cal_data
     ; call bmp280_compute_compensation
@@ -102,6 +104,10 @@ main:
     mov R4,#tmp2
     mov R5,#tmp1
     call div_32bit
+
+    ; mov R4,#tmp2
+    ; mov R5,#tmp1
+    ; call check_sign
 
     mov R1,#1
     mov R0,#tmp1
@@ -421,8 +427,9 @@ mul_32bit_no_carry:
     djnz R2,mul_32bit_loop ;Repeat for every multiplier bit
     ret
 
-;R3 - pointer to remainder, R4 - pointer to divisor, R5 - pointer to dividend and result
+;R3 - pointer to remainder, R4 - pointer to divisor, R5 - pointer to dividend and result, uses ALL registers and BOTH flags
 div_32bit:
+    ; call check_sign ;Check sign of operands, complement them if needed
     call zero_32bit ;Clear remainder
     mov R2,#32 ;Set loop counter
     clr C ;Clear carry
@@ -447,6 +454,57 @@ div_32bit_continue:
     djnz R2,div_32bit_loop
     mov R6,#1
     call shlc_32bit ;Shift dividend one last time
+    ; jf1 div_32bit_end ;If there's no need to change sign of the result, finish
+    ; call neg_32bit ;Change sign of the result
+; div_32bit_end:
+    ret
+
+;R4 - pointer to first value, R5 - pointer to second value, F1 - sign flag, if cleared, result sign has to be changed, uses F1,R0,R4,R5
+check_sign:
+    clr F1
+    cpl F1 ;Set sign flag
+    mov A,R4 ;Load pointer to first value to A
+    add A,#3 ;Move pointer to MSB
+    mov R0,A ;Load pointer to MSB to R0
+    mov A,@R0 ;Load MSB to A
+    cpl A ;Complement A
+    jb7 check_sign_first_pos ;If sign bit is not set, proceed to check second value
+    >swap R4,R5
+    call neg_32bit
+    >swap R4,R5
+    cpl F1 ;Complement sign flag
+check_sign_first_pos:
+    mov A,R5 ;Load pointer to second value to A
+    add A,#3 ;Move pointer to MSB
+    mov R0,A ;Load pointer to MSB to R0
+    mov A,@R0 ;Load MSB to A
+    cpl A ;Complement A
+    jb7 check_sign_done ;If sign bit is not set, finish
+    call neg_32bit
+    cpl F1 ;Complement sign flag
+check_sign_done:
+    ret
+
+;R5 - pointer to value to change sign of, uses R0,R1,R3,R4,R5,R7
+neg_32bit:
+    mov R7,#4 ;Load loop counter
+    mov A,R5
+    mov R0,A ;Copy R5 to R0, only R0 and R1 can be used to access RAM
+neg_32bit_loop:
+    mov A,@R0 ;Load byte to A
+    cpl A ;Complement A
+    mov @R0,A ;Store value back in RAM
+    inc R0
+    djnz R7,neg_32bit_loop ;Repeat for every byte
+
+    mov R3,#tmp_neg
+    call zero_32bit ;Clear tmp_neg variable
+    mov R0,#tmp_neg
+    mov @R0,#1 ;tmp_neg = 1
+    mov A,R5
+    mov R3,A ;Load pointer to value to R3
+    mov R4,#tmp_neg
+    call add_32bit ;Add 1 to result to finish two's complement
     ret
 
 ;R6 - delay time in msec, uses R6,R7
