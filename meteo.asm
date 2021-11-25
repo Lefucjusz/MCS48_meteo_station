@@ -94,35 +94,35 @@ main:
     ; call load_cal_data
     ; call bmp280_compute_compensation
 
-    mov R3,#tmp2
-    mov R4,#tmp1
-    call sub_32bit
+    ; mov R3,#tmp2
+    ; mov R4,#tmp1
+    ; call sub_32bit
 
-    ; mov R3,#tmp3
-    ; mov R4,#tmp2
-    ; mov R5,#tmp1
-    ; call div_32bit
+    mov R3,#tmp3
+    mov R4,#tmp2
+    mov R5,#tmp1
+    call div_32bit
 
     mov R1,#1
-    mov R0,#tmp2
+    mov R0,#tmp1
     mov A,@R0
     mov R0,A
     call lcd_write
 
-    mov R0,#tmp2
+    mov R0,#tmp1
     inc R0
     mov A,@R0
     mov R0,A
     call lcd_write
 
-    mov R0,#tmp2
+    mov R0,#tmp1
     inc R0
     inc R0
     mov A,@R0
     mov R0,A
     call lcd_write
 
-    mov R0,#tmp2
+    mov R0,#tmp1
     inc R0
     inc R0
     inc R0
@@ -378,7 +378,7 @@ add_32bit_loop:
     djnz R7,add_32bit_loop ;Repeat for all bytes
     ret
 
-;R3 - pointer to minuend and result, R4 - pointer to second subtrahend, uses R0,R1,R3,R4,R7
+;R3 - pointer to minuend and result, R4 - pointer to second subtrahend, uses R0,R1,R3,R4,R6,R7
 sub_32bit:
     clr C ;Clear carry
     mov R7,#4 ;Load loop counter
@@ -386,15 +386,15 @@ sub_32bit:
     mov R0,A ;Copy R3 to R0, to preserve R3, also only R0 and R1 can be used to access RAM
     mov A,R4
     mov R1,A ;Copy R4 to R1, the same reason as above
-sub_32bit_loop:    
-    jnc sub_32bit_no_borrow ;If no borrow from previous subtraction, continue with algorithm
+sub_32bit_loop: 
     mov A,@R1 ;A = [R1]
-    inc A ;If previous subtraction caused borrow, apply it here: A = [R1]+1
-    mov @R1,A ;[R1] = A
+    mov R6,A ;Store value in R6 to prevent modifying subtrahend while applying carry 
+    jnc sub_32bit_no_borrow ;If no borrow from previous subtraction, continue with algorithm
+    inc R6 ;If previous subtraction caused borrow, apply it here: R6 = [R1]+1
 sub_32bit_no_borrow:
     mov A,@R0 ;A = [R0]
     cpl A ;A = -[R0]-1, that's how two's complement works
-    add A,@R1 ;A = -[R0]-1+[R1]
+    add A,R6 ;A = -[R0]-1+[R1]
     cpl A ;A = -(-[R0]-1+[R1])-1 = [R0]+1-[R1]-1 = [R0]-[R1]
     mov @R0,A ;[R0] = [R0]-[R1]
     inc R0
