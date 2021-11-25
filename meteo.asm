@@ -386,11 +386,13 @@ sub_32bit:
     mov R0,A ;Copy R3 to R0, to preserve R3, also only R0 and R1 can be used to access RAM
     mov A,R4
     mov R1,A ;Copy R4 to R1, the same reason as above
-sub_32bit_loop:
-    mov A,@R0 ;A = [R0]
+sub_32bit_loop:    
     jnc sub_32bit_no_borrow ;If no borrow from previous subtraction, continue with algorithm
-    dec A ;If previous subtraction caused borrow, apply it here: A = [R0]-1 
+    mov A,@R1 ;A = [R1]
+    inc A ;If previous subtraction caused borrow, apply it here: A = [R1]+1
+    mov @R1,A ;[R1] = A
 sub_32bit_no_borrow:
+    mov A,@R0 ;A = [R0]
     cpl A ;A = -[R0]-1, that's how two's complement works
     add A,@R1 ;A = -[R0]-1+[R1]
     cpl A ;A = -(-[R0]-1+[R1])-1 = [R0]+1-[R1]-1 = [R0]-[R1]
