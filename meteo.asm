@@ -49,76 +49,41 @@ movr    .ma Rx,Ry ;Moves Ry to Rx (Rx = Ry)
 	.no $00 ;Set jump to main at reset vector (00h)
 	jmp main
 
-text    .az /Siema eniu!/
-
 main:
-    mov R2,#text
-send:
-    mov A,R2
-    movp A,@A
-    jz loop
+    mov R0,#temp_read
+    mov @R0,#$D0
+    inc R0
+    mov @R0,#$EE
+    inc R0
+    mov @R0,#$07
+    inc R0
+    mov @R0,#$00
+
+    call load_cal_data
+    call bmp280_compute_compensation
+
+    mov A,#tmp2
+    add A,#3
+    mov R1,A
+    mov A,@R1
     mov R0,A
     call uart_write_byte
-    inc R2
-    jmp send
-    ; call lcd_init
-    
-    ; mov R1,#1
-    ; mov R0,#'R'
-    ; call lcd_write
-    ; mov R0,#'e'
-    ; call lcd_write
-    ; mov R0,#'s'
-    ; call lcd_write
-    ; mov R0,#'u'
-    ; call lcd_write
-    ; mov R0,#'l'
-    ; call lcd_write
-    ; mov R0,#'t'
-    ; call lcd_write
-    ; mov R0,#':'
-    ; call lcd_write
-    ; mov R0,#' '
-    ; call lcd_write
 
-    ; mov R0,#temp_read
-    ; mov @R0,#$D0
-    ; inc R0
-    ; mov @R0,#$EE
-    ; inc R0
-    ; mov @R0,#$07
-    ; inc R0
-    ; mov @R0,#$00
+    dec R1
+    mov A,@R1
+    mov R0,A
+    call uart_write_byte
 
-    ; call load_cal_data
-    ; call bmp280_compute_compensation
+    dec R1
+    mov A,@R1
+    mov R0,A
+    call uart_write_byte
 
-    ; mov R1,#1
-    ; mov R0,#tmp3
-    ; mov A,@R0
-    ; mov R0,A
-    ; call lcd_write
+    dec R1
+    mov A,@R1
+    mov R0,A
+    call uart_write_byte
 
-    ; mov R0,#tmp3
-    ; inc R0
-    ; mov A,@R0
-    ; mov R0,A
-    ; call lcd_write
-
-    ; mov R0,#tmp3
-    ; inc R0
-    ; inc R0
-    ; mov A,@R0
-    ; mov R0,A
-    ; call lcd_write
-
-    ; mov R0,#tmp3
-    ; inc R0
-    ; inc R0
-    ; inc R0
-    ; mov A,@R0
-    ; mov R0,A
-    ; call lcd_write
 loop:
 	jmp loop
 
@@ -126,79 +91,89 @@ loop:
 
 ;Subroutines
 
-; bmp280_compute_compensation:
-;     mov R0,#tmp1
-;     mov R1,#temp_read
-;     mov R7,#4
-;     call copy_32bit ;Copy 4 bytes, tmp1 = temp_read
-;     clr F0 ;Perform signed shift
-;     mov R5,#tmp1
-;     mov R6,#3
-;     call shr_32bit ;tmp1 = temp_read>>3
-;     mov R0,#tmp2
-;     mov R1,#cal_T1
-;     mov R7,#2
-;     call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
-;     mov R5,#tmp2
-;     mov R6,#1
-;     call shl_32bit ;tmp2 = cal_T1<<1
-;     mov R0,#tmp1
-;     mov R1,#tmp2
-;     call sub_32bit ;tmp1 = temp_read>>3 - cal_T1<<1
-;     mov R0,#tmp2
-;     mov R1,#cal_T2
-;     mov R7,#2
-;     call copy_32bit ;Copy 2 bytes, tmp2 = cal_T2
-;     mov R3,#tmp3
-;     mov R4,#tmp1
-;     mov R5,#tmp2
-;     call mul_32bit ;tmp3 = (temp_read>>3 - cal_T1<<1) * cal_T2
-;     clr F0 ;Perform signed shift
-;     mov R5,#tmp3
-;     mov R6,#11
-;     call shr_32bit ;tmp3 = ((temp_read>>3 - cal_T1<<1) * cal_T2) >> 11
-    
-    ; mov R4,#tmp1
-    ; mov R5,#temp_read
-    ; mov R6,#4
-    ; call copy_mem ;Copy 4 bytes, tmp1 = temp_read
-    ; mov R5,#tmp1
-    ; mov R6,#4
-    ; call shr_32bit ;tmp1 = temp_read>>4
-    ; mov R4,#tmp2
-    ; mov R5,#cal_T1
-    ; mov R6,#2
-    ; call copy_mem ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
-    ; mov R4,#tmp1
-    ; mov R5,#tmp2
-    ; call sub_32bit ;tmp1 = temp_read>>4 - cal_T1
-    ; mov R4,#tmp2
-    ; mov R5,#tmp1
-    ; mov R6,#4
-    ; call copy_mem ;Copy 4 bytes, tmp2 = tmp1 = temp_read>>4 - cal_T1
-    ; mov R3,#tmp4
-    ; mov R4,#tmp1
-    ; mov R5,#tmp2
-    ; call mul_32bit ;tmp4 = (temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)
-    ; mov R5,#tmp4
-    ; mov R6,#12
-    ; clr F0 ;Clear F0 again, it was set in mul_32bit
-    ; call shr_32bit ;tmp4 = ((temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)) >> 12
-    ; mov R4,#tmp1
-    ; mov R5,#cal_T3
-    ; mov R6,#2
-    ; call copy_mem ;Copy 2 bytes - tmp1 (32-bit) = cal_T3 (16-bit)
-    ; mov R3,#tmp2
-    ; ; mov R4,#tmp1 ;R4 is already loaded with tmp1
-    ; mov R5,#tmp4
-    ; call mul_32bit ;tmp2 = (((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3
-    ; ret
+bmp280_compute_compensation:
+    mov R0,#tmp1
+    mov R1,#temp_read
+    mov R6,#4
+    call copy_32bit ;Copy 4 bytes, tmp1 = temp_read
+    clr F0 ;Perform signed shift
+    mov R5,#tmp1
+    mov R6,#3
+    call shr_32bit ;tmp1 = temp_read>>3
+    mov R0,#tmp2
+    mov R1,#cal_T1
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
+    mov R5,#tmp2
+    mov R6,#1
+    call shl_32bit ;tmp2 = cal_T1<<1
+    mov R0,#tmp1
+    mov R1,#tmp2
+    call sub_32bit ;tmp1 = temp_read>>3 - cal_T1<<1
+    mov R0,#tmp2
+    mov R1,#cal_T2
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes, tmp2 = cal_T2
+    mov R3,#tmp3
+    mov R4,#tmp1
+    mov R5,#tmp2
+    call mul_32bit ;tmp3 = (temp_read>>3 - cal_T1<<1) * cal_T2
+    clr F0 ;Perform signed shift
+    mov R5,#tmp3
+    mov R6,#11
+    call shr_32bit ;tmp3 = ((temp_read>>3 - cal_T1<<1) * cal_T2) >> 11
+
+    mov R0,#tmp1
+    mov R1,#temp_read
+    mov R6,#4
+    call copy_32bit ;Copy 4 bytes, tmp1 = temp_read
+
+    clr F0 ;Perform signed shift
+    mov R5,#tmp1
+    mov R6,#4
+    call shr_32bit ;tmp1 = temp_read>>4
+
+    mov R0,#tmp2
+    mov R1,#cal_T1
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
+
+    mov R0,#tmp1
+    mov R1,#tmp2
+    call sub_32bit ;tmp1 = temp_read>>4 - cal_T1
+
+    mov R0,#tmp2
+    mov R1,#tmp1
+    mov R6,#4
+    call copy_32bit ;Copy 4 bytes, tmp2 = tmp1 = temp_read>>4 - cal_T1
+
+    mov R3,#tmp4
+    mov R4,#tmp1
+    mov R5,#tmp2
+    call mul_32bit ;tmp4 = (temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)
+
+    clr F0 ;Perform signed shift
+    mov R5,#tmp4
+    mov R6,#12
+    call shr_32bit ;tmp4 = ((temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)) >> 12
+
+    mov R0,#tmp1
+    mov R1,#cal_T3
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_T3 (16-bit)
+
+    mov R3,#tmp2
+    mov R4,#tmp4
+    mov R5,#tmp1
+    call mul_32bit ;tmp2 = (((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3
+    ret
 
 
-    ; mov R5,#tmp2
-    ; mov R6,#14
-    ; clr F0 ;Clear F0 again, it was set in mul_32bit
-    ; call shr_32bit ;tmp2 = ((((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3) >> 14
+    clr F0 ;Perform signed shift
+    mov R5,#tmp2
+    mov R6,#14
+    call shr_32bit ;tmp2 = ((((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3) >> 14
+
     ; mov R4,#tmp3
     ; ;mov R5,#tmp2 ;R5 is already loaded with tmp2
     ; call add_32bit ;tmp3 = t_fine = var1 + var2, see BMP280 datasheet
@@ -296,17 +271,17 @@ zero_32bit_loop:
     djnz R7,zero_32bit_loop ;Repeat for every byte
     ret
 
-;R0 - pointer to destination, R1 - pointer to source, R7 - number of bytes to copy, uses and destroys R0,R1,R6,R7
+;F0 - signedness, if set, unsigned, R0 - pointer to destination, R1 - pointer to source, R6 - number of bytes to copy, uses F0,R0,R1,R5,R6,R7, destroys R0,R1,R5,R6,R7
 copy_32bit:
-    >movr R6,R0 ;Preserve R0 in R6, as zero_32bit will change R0 value
+    >movr R5,R0 ;Preserve R0 in R5, as zero_32bit will change R0 value
     call zero_32bit ;Clear destination
-    >movr R0,R6 ;Restore R0 from R6
+    >movr R0,R5 ;Restore R0 from R5
 copy_32bit_loop:
     mov A,@R1
     mov @R0,A ;Copy [R1] to [R0]
     inc R0
     inc R1 ;Move pointers to next byte
-    djnz R7,copy_32bit_loop
+    djnz R6,copy_32bit_loop
     ret
 
 ;R5 - pointer to value to be shifted, R6 - number of positions to shift, uses R0,R5,R6,R7, destroys R0,R6,R7
@@ -324,7 +299,7 @@ shl_32bit_loop:
     djnz R6,shl_32bit ;Repeat the whole process required number of times
     ret
 
-;F0 - operation signedness, if set, unsigned, R5 - pointer to value to be shifted, R6 - number of positions to shift, uses F0,R0,R5,R6,R7, destroys F0,R0,R6,R7
+;F0 - signedness, if set, unsigned, R5 - pointer to value to be shifted, R6 - number of positions to shift, uses F0,R0,R5,R6,R7, destroys F0,R0,R6,R7
 shr_32bit:
     clr C ;Clear carry bit
 shrc_32bit:
@@ -479,7 +454,7 @@ check_sign_first_pos:
 check_sign_done:
     ret
 
-;R0	- byte to send, uses R0,R1,R6,R7
+;R0	- byte to send, uses R0,R6,R7
 uart_write_byte:
 	mov R6,#8 ;Load bit counter	
 	mov A,R0 ;Move byte to be send to A	
@@ -516,9 +491,8 @@ delay_500us_loop:
 
 ;R6 - delay time in msec, uses R6,R7
 delay_ms:
-	mov R7,#248
+	mov R7,#228
 delay_ms_loop:
-	nop
 	nop
 	djnz R7,delay_ms_loop
 	djnz R6,delay_ms
