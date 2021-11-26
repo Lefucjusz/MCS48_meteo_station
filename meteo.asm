@@ -41,6 +41,11 @@ swap    .ma Rx,Ry ;Swaps two registers
         mov ]1,A ;Store Ry in Rx
         .em
 
+movr    .ma Rx,Ry ;Moves Ry to Rx (Rx = Ry)
+        mov A,]2 ;Move Ry to A
+        mov ]1,A ;Move A to Rx
+        .em
+
 ;Set vectors
 	.no $00 ;Set jump to main at reset vector (00h)
 	jmp main
@@ -76,16 +81,16 @@ main:
     ; mov @R0,#$00
 
     mov R0,#tmp1
-    mov @R0,#$22
+    mov @R0,#$55
     inc R0
-    mov @R0,#$22
+    mov @R0,#$44
     inc R0
-    mov @R0,#$22
+    mov @R0,#$33
     inc R0
     mov @R0,#$22
 
     mov R0,#tmp2
-    mov @R0,#$FD
+    mov @R0,#$FE
     inc R0
     mov @R0,#$FF
     inc R0
@@ -103,8 +108,8 @@ main:
     mov R3,#tmp3
     mov R4,#tmp2
     mov R5,#tmp1
-    ; call check_sign
     call div_32bit
+   
 
     ; mov R1,#1
     ; mov A,R3
@@ -253,25 +258,25 @@ bmp280_compute_compensation:
     ret
 
 load_cal_data:
-    mov R0,#cal_T1
-    mov @R0,#$70
-    inc R0
-    mov @R0,#$6B
+    ; mov R0,#cal_T1
+    ; mov @R0,#$70
+    ; inc R0
+    ; mov @R0,#$6B
 
-    mov R0,#cal_T2
-    mov @R0,#$43
-    inc R0
-    mov @R0,#$67
+    ; mov R0,#cal_T2
+    ; mov @R0,#$43
+    ; inc R0
+    ; mov @R0,#$67
 
-    mov R0,#cal_T3
-    mov @R0,#$18
-    inc R0
-    mov @R0,#$FC
+    ; mov R0,#cal_T3
+    ; mov @R0,#$18
+    ; inc R0
+    ; mov @R0,#$FC
 
-    mov R0,#cal_P1
-    mov @R0,#$7D
-    inc R0
-    mov @R0,#$8E
+    ; mov R0,#cal_P1
+    ; mov @R0,#$7D
+    ; inc R0
+    ; mov @R0,#$8E
 
     ; mov R0,#cal_P2
     ; mov @R0,#$43
@@ -313,216 +318,6 @@ load_cal_data:
 ;     inc R0
 ;     mov @R0,#$17
 ;     ret
-
-;R3 - pointer to value to be zeroed, uses R0,R3,R7
-zero_32bit:
-    mov A,R3 ;TODO add comments
-    mov R0,A
-    mov R7,#4
-    clr A
-zero_32bit_loop:
-    mov @R0,A
-    inc R0
-    djnz R7,zero_32bit_loop
-    ret
-
-;R3 - pointer to destination, R4 - pointer to source, R6 - number of bytes to copy, uses R0,R1,R4,R5,R6,R7
-copy_32bit:
-    call zero_32bit
-    mov A,R3
-    mov R0,A ;Copy R3 to R0, to preserve R4, also only R0 and R1 can be used to access RAM
-    mov A,R4
-    mov R1,A ;Copy R4 to R1, the same reason as above
-copy_32bit_loop:
-    mov A,@R1
-    mov @R0,A ;Copy [R1] to [R0]
-    inc R0
-    inc R1 ;Move pointers to next byte
-    djnz R6,copy_32bit_loop
-    ret
-
-;R5 - pointer to value to be shifted, R6 - number of positions to shift left, uses R0,R5,R6,R7
-shl_32bit:
-    clr C ;Clear carry bit
-shlc_32bit:
-    mov R7,#4 ;Load loop counter
-    mov A,R5
-    mov R0,A ;Copy R5 to R0, so that R5 won't be changed in inner loop - needed to shift by multiple positions
-shl_32bit_loop:
-    mov A,@R0 ;Load byte from RAM to A
-    rlc A ;Rotate A left through carry - C->A0, A7->C
-    mov @R0,A ;Store result back in RAM
-    inc R0 ;Move pointer to next byte
-    djnz R7,shl_32bit_loop ;Repeat for all bytes
-    djnz R6,shl_32bit ;Repeat the whole process required number of times
-    ret
-
-;F0 - operation signedness, if set, unsigned, R5 - pointer to value to be shifted, R6 - number of positions to shift right, uses F0,R0,R5,R6,R7
-shr_32bit:
-    clr C ;Clear carry bit
-shrc_32bit:
-    mov R7,#4 ;Load loop counter
-    mov A,R5 ;Load R5 to A
-    add A,#3 ;Move pointer to MSB
-    mov R0,A ;Store result in R0, so that R5 won't be changed - needed to shift by multiple positions
-    jf0 shr_32bit_loop ;If flag set, do not set carry - perform unsigned shift
-    mov A,@R0 ;Load MSB to A
-    cpl A ;Complement A because of lack of jnbx instruction
-    jb7 shr_32bit_loop ;If sign bit is not set (negation of sign bit is set, actually...), value is positive, perform unsigned shift
-    cpl C ;Otherwise set carry - perform signed shift
-shr_32bit_loop:
-    mov A,@R0 ;Load byte from RAM to A
-    rrc A ;Rotate A right through carry - C->A7, A0->C
-    mov @R0,A ;Store result back in RAM
-    dec R0 ;Move pointer to previous byte
-    djnz R7,shr_32bit_loop ;Repeat for all bytes
-    djnz R6,shr_32bit ;Repeat the whole operation required number of times
-    ret
-
-;R3 - pointer to first addend and result, R4 - pointer to second addend, uses R0,R1,R3,R4,R7
-add_32bit:
-    clr C ;Clear carry
-    mov R7,#4 ;Load loop counter
-    mov A,R3
-    mov R0,A ;Copy R3 to R0, to preserve R3, also only R0 and R1 can be used to access RAM
-    mov A,R4
-    mov R1,A ;Copy R4 to R1, the same reason as above
-add_32bit_loop:
-    mov A,@R1 ;Load byte from RAM to A
-    addc A,@R0 ;Add byte from second added
-    mov @R0,A ;Store back in RAM
-    inc R0 
-    inc R1 ;Move both pointers to next byte
-    djnz R7,add_32bit_loop ;Repeat for all bytes
-    ret
-
-;R3 - pointer to minuend and result, R4 - pointer to second subtrahend, uses R0,R1,R3,R4,R7
-sub_32bit:
-    clr C ;Clear carry
-    mov R7,#4 ;Load loop counter
-    mov A,R3
-    mov R0,A ;Copy R3 to R0, to preserve R3, also only R0 and R1 can be used to access RAM
-    mov A,R4
-    mov R1,A ;Copy R4 to R1, the same reason as above
-sub_32bit_loop: 
-    mov A,@R0 ;A = [R0]
-    cpl A ;A = -[R0]-1, that's how two's complement works
-    addc A,@R1 ;A = -[R0]-1+[R1]+C
-    cpl A ;A = -(-[R0]-1+[R1]+C)-1 = [R0]+1-[R1]-C-1 = [R0]-[R1]-C
-    mov @R0,A ;[R0] = [R0]-[R1]-C
-    inc R0
-    inc R1
-    djnz R7,sub_32bit_loop
-    ret
-
-;R3 - pointer to result, R4 - pointer to multiplicand, R5 - pointer to multiplier, uses ALL registers and F0
-mul_32bit:
-    call zero_32bit ;Clear result
-    mov R2,#32 ;Set loop counter
-    clr F0
-    cpl F0 ;Set F0 - perform unsigned right shifts
-mul_32bit_loop:
-    mov R6,#1
-    call shr_32bit ;Shift multiplier 1 time right
-    jnc mul_32bit_no_carry ;If carry not set, don't add multiplicand to result
-    call add_32bit ;Add multiplicand to result
-mul_32bit_no_carry:
-    >swap R4,R5 ;Swap R4 and R5
-    mov R6,#1
-    call shl_32bit ;Shift multiplicand 1 time left
-    >swap R4,R5 ;Revert R4 and R5 to original state
-    djnz R2,mul_32bit_loop ;Repeat for every multiplier bit
-    ret
-
-;R3 - pointer to remainder, R4 - pointer to divisor, R5 - pointer to dividend and result, uses ALL registers and BOTH flags
-div_32bit:
-
-    call check_sign ;Check sign of operands, complement them if needed
-    call zero_32bit ;Clear remainder
-    mov R2,#32 ;Set loop counter
-    clr C ;Clear carry
-    clr F0
-    cpl F0 ;Set F0 - perform unsigned right shifts
-div_32bit_loop:
-    mov R6,#1
-    call shlc_32bit ;Shift dividend left with carry
-    >swap R3,R5 ;Swap R3 and R5
-    mov R6,#1
-    call shlc_32bit ;Shift carry (MSB of dividend) into remainder
-    >swap R3,R5 ;Revert swap
-    call sub_32bit ;remainder = remainder - divisor
-    jnc div_32bit_fit ;If result positive, divisor fits into remainder
-    call add_32bit ;If result negative, restore remainder    
-    clr C ;Clear carry to be shifted into result
-    jmp div_32bit_continue
-div_32bit_fit:
-    clr C
-    cpl C ;Set carry to be shifted into result
-div_32bit_continue:
-    djnz R2,div_32bit_loop
-    mov R6,#1
-    call shlc_32bit ;Shift dividend one last time
-    jf1 div_32bit_end ;If there's no need to change sign of the result, finish
-    call neg_32bit ;Change sign of the result
-div_32bit_end:
-    ret
-
-;R4 - pointer to first value, R5 - pointer to second value, F1 - sign flag, if cleared, result sign has to be changed, uses F1,R0,R4,R5
-check_sign:
-    clr F1
-    cpl F1 ;Set sign flag
-
-    mov A,R4
-    mov R6,A ;Preserve R4 in R6, as neg_32bit routine will destroy R4
-
-    mov A,R4 ;Load pointer to first value to A
-    add A,#3 ;Move pointer to MSB
-    mov R0,A ;Load pointer to MSB to R0
-    mov A,@R0 ;Load MSB to A
-    cpl A ;Complement A
-    jb7 check_sign_first_pos ;If sign bit is not set, proceed to check second value
-    >swap R5,R6
-    call neg_32bit
-    >swap R5,R6
-    cpl F1 ;Complement sign flag
-check_sign_first_pos:
-    mov A,R5 ;Load pointer to second value to A
-    add A,#3 ;Move pointer to MSB
-    mov R0,A ;Load pointer to MSB to R0
-    mov A,@R0 ;Load MSB to A
-    cpl A ;Complement A
-    jb7 check_sign_done ;If sign bit is not set, finish
-    call neg_32bit
-    cpl F1 ;Complement sign flag
-check_sign_done:
-    mov A,R6
-    mov R4,A ;Restore R4 value
-    ret
-
-;R5 - pointer to value to change sign of, uses R0,R1,R3,R4,R5,R7
-neg_32bit:
-    mov A,R3
-    mov R2,A ;DEBUG preserve R3
-    mov R7,#4 ;Load loop counter
-    mov A,R5
-    mov R0,A ;Copy R5 to R0, only R0 and R1 can be used to access RAM
-neg_32bit_loop:
-    mov A,@R0 ;Load byte to A
-    cpl A ;Complement A
-    mov @R0,A ;Store value back in RAM
-    inc R0
-    djnz R7,neg_32bit_loop ;Repeat for every byte
-    mov R3,#tmp_neg
-    call zero_32bit ;Clear tmp_neg variable
-    mov R0,#tmp_neg
-    mov @R0,#1 ;tmp_neg = 1
-    mov A,R5
-    mov R3,A ;Load pointer to value to R3
-    mov R4,#tmp_neg
-    call add_32bit ;Add 1 to result to finish two's complement
-    mov A,R2
-    mov R3,A ;DEBUG restore R3
-    ret
 
 ;R6 - delay time in msec, uses R6,R7
 delay_ms:
@@ -635,3 +430,196 @@ lcd_cls:
 	mov R6,#1
 	call delay_ms ;Wait 1ms
 	ret	
+
+;R0 - pointer to value to be zeroed, uses and destroys R0,R7
+zero_32bit:
+    clr A ;Clear A
+    mov R7,#4 ;Load loop counter
+zero_32bit_loop:
+    mov @R0,A ;Load A = 0 to byte
+    inc R0 ;Move pointer to next byte
+    djnz R7,zero_32bit_loop ;Repeat for every byte
+    ret
+
+;R0 - pointer to destination, R1 - pointer to source, R7 - number of bytes to copy, uses and destroys R0,R1,R6,R7
+copy_32bit:
+    >movr R6,R0 ;Preserve R0 in R6, as zero_32bit will change R0 value
+    call zero_32bit ;Clear destination
+    >movr R0,R6 ;Restore R0 from R6
+copy_32bit_loop:
+    mov A,@R1
+    mov @R0,A ;Copy [R1] to [R0]
+    inc R0
+    inc R1 ;Move pointers to next byte
+    djnz R7,copy_32bit_loop
+    ret
+
+;R5 - pointer to value to be shifted, R6 - number of positions to shift, uses R0,R5,R6,R7, destroys R0,R6,R7
+shl_32bit:
+    clr C ;Clear carry bit
+shlc_32bit:
+    mov R7,#4 ;Load loop counter
+    >movr R0,R5 ;Copy R5 to R0, so that R5 won't be changed in inner loop - needed to shift by multiple positions
+shl_32bit_loop:
+    mov A,@R0 ;Load byte from RAM to A
+    rlc A ;Rotate A left through carry - C->A0, A7->C
+    mov @R0,A ;Store result back in RAM
+    inc R0 ;Move pointer to next byte
+    djnz R7,shl_32bit_loop ;Repeat for all bytes
+    djnz R6,shl_32bit ;Repeat the whole process required number of times
+    ret
+
+;F0 - operation signedness, if set, unsigned, R5 - pointer to value to be shifted, R6 - number of positions to shift, uses F0,R0,R5,R6,R7, destroys F0,R0,R6,R7
+shr_32bit:
+    clr C ;Clear carry bit
+shrc_32bit:
+    mov R7,#4 ;Load loop counter
+    mov A,R5 ;Load R5 to A
+    add A,#3 ;Move pointer to MSB
+    mov R0,A ;Store result in R0, so that R5 won't be changed - needed to shift by multiple positions
+    jf0 shr_32bit_loop ;If flag set, do not set carry - perform unsigned shift
+    mov A,@R0 ;Load MSB to A
+    cpl A ;Complement A because of lack of jnbx instruction
+    jb7 shr_32bit_loop ;If sign bit is not set (negation of sign bit is set, actually...), value is positive, perform unsigned shift
+    cpl C ;Otherwise set carry - perform signed shift
+shr_32bit_loop:
+    mov A,@R0 ;Load byte from RAM to A
+    rrc A ;Rotate A right through carry - C->A7, A0->C
+    mov @R0,A ;Store result back in RAM
+    dec R0 ;Move pointer to previous byte
+    djnz R7,shr_32bit_loop ;Repeat for all bytes
+    djnz R6,shr_32bit ;Repeat the whole operation required number of times
+    ret
+
+;R0 - pointer to first addend and result, R1 - pointer to second addend, uses and destroys R0,R1,R7
+add_32bit:
+    clr C ;Clear carry
+    mov R7,#4 ;Load loop counter
+add_32bit_loop:
+    mov A,@R1 ;Load byte from RAM to A
+    addc A,@R0 ;Add byte from second added
+    mov @R0,A ;Store back in RAM
+    inc R0 
+    inc R1 ;Move both pointers to next byte
+    djnz R7,add_32bit_loop ;Repeat for all bytes
+    ret
+
+;R0 - pointer to minuend and result, R1 - pointer to second subtrahend, uses and destroys R0,R1,R7
+sub_32bit:
+    clr C ;Clear carry
+    mov R7,#4 ;Load loop counter
+sub_32bit_loop: 
+    mov A,@R0 ;A = [R0]
+    cpl A ;A = -[R0]-1, that's how two's complement works
+    addc A,@R1 ;A = -[R0]-1+[R1]+C
+    cpl A ;A = -(-[R0]-1+[R1]+C)-1 = [R0]+1-[R1]-C-1 = [R0]-[R1]-C
+    mov @R0,A ;[R0] = [R0]-[R1]-C
+    inc R0
+    inc R1
+    djnz R7,sub_32bit_loop
+    ret
+
+;R0 - pointer to value to change sign of, uses and destroys R0,R1,R7
+neg_32bit:
+    mov R7,#4 ;Load loop counter
+    >movr R1,R0 ;Preserve pointer to value in R1 - it will be used again later
+neg_32bit_loop:
+    mov A,@R0 ;Load byte to A
+    cpl A ;Complement A
+    mov @R0,A ;Store value back in RAM
+    inc R0
+    djnz R7,neg_32bit_loop ;Repeat for every byte
+    mov R0,#tmp_neg
+    call zero_32bit ;Clear tmp_neg variable
+    mov R0,#tmp_neg
+    mov @R0,#1 ;tmp_neg = 1
+    >movr R0,R1 ;Load pointer to value back to R0
+    mov R1,#tmp_neg
+    call add_32bit ;Add 1 to result to finish two's complement
+    ret
+
+;R3 - pointer to result, R4 - pointer to multiplicand, R5 - pointer to multiplier, uses F0 and ALL registers, destroys F0,R0,R1,R2,R6,R7
+mul_32bit:
+    >movr R0,R3 ;Load R3 to R0
+    call zero_32bit ;Clear result
+    mov R2,#32 ;Set loop counter
+    clr F0
+    cpl F0 ;Set F0 - perform unsigned right shifts
+mul_32bit_loop: 
+    mov R6,#1 
+    call shr_32bit ;Shift multiplier 1 time right
+    jnc mul_32bit_no_carry ;If carry not set, don't add multiplicand to result
+    >movr R0,R3 ;Load R3 to R0
+    >movr R1,R4 ;Load R4 to R1
+    call add_32bit ;Add multiplicand to result
+mul_32bit_no_carry:
+    >swap R4,R5 ;Swap R4 and R5
+    mov R6,#1
+    call shl_32bit ;Shift multiplicand 1 time left
+    >swap R4,R5 ;Revert swap
+    djnz R2,mul_32bit_loop ;Repeat for every multiplier bit
+    ret
+
+;R3 - pointer to remainder, R4 - pointer to divisor, R5 - pointer to dividend and result, uses BOTH flags and ALL registers, destroys F0,F1,R0,R1,R2,R6,R7
+div_32bit:
+    call check_sign ;Check sign of operands, complement them if needed
+    >movr R0,R3 ;Load pointer to remainder to R0
+    call zero_32bit ;Clear remainder
+    mov R2,#32 ;Set loop counter
+    clr C ;Clear carry
+    clr F0
+    cpl F0 ;Set F0 - perform unsigned right shifts
+div_32bit_loop:
+    mov R6,#1
+    call shlc_32bit ;Shift dividend left with carry
+    >swap R3,R5 ;Swap R3 and R5
+    mov R6,#1
+    call shlc_32bit ;Shift carry (MSB of dividend) into remainder
+    >swap R3,R5 ;Revert swap
+    >movr R0,R3 ;Load pointer to remainder to R0
+    >movr R1,R4 ;Load pointer to divisor to R1
+    call sub_32bit ;remainder = remainder - divisor
+    jnc div_32bit_fit ;If result positive, divisor fits into remainder
+    >movr R0,R3 ;Load pointer to remainder to R0
+    >movr R1,R4 ;Load pointer to divisor to R1
+    call add_32bit ;Restore remainder    
+    clr C ;Clear carry to be shifted into result
+    jmp div_32bit_continue
+div_32bit_fit:
+    clr C
+    cpl C ;Set carry to be shifted into result
+div_32bit_continue:
+    djnz R2,div_32bit_loop
+    mov R6,#1
+    call shlc_32bit ;Shift dividend one last time
+    jf1 div_32bit_end ;If there's no need to change sign of the result, finish
+    >movr R0,R5 ;Load pointer to result to R0
+    call neg_32bit ;Change sign of the result
+div_32bit_end:
+    ret
+
+;R4 - pointer to first value, R5 - pointer to second value, F1 - sign flag, if cleared, result sign has to be changed, uses F1,R0,R1,R4,R5,R7
+check_sign:
+    clr F1
+    cpl F1 ;Set sign flag
+    mov A,R4 ;Load pointer to first value to A
+    add A,#3 ;Move pointer to MSB
+    mov R0,A ;Load pointer to MSB to R0
+    mov A,@R0 ;Load MSB to A
+    cpl A ;Complement A
+    jb7 check_sign_first_pos ;If sign bit is not set, proceed to check second value
+    >movr R0,R4 ;Load pointer to first value to R0
+    call neg_32bit ;Change sign of value
+    cpl F1 ;Complement sign flag
+check_sign_first_pos:
+    mov A,R5 ;Load pointer to second value to A
+    add A,#3 ;Move pointer to MSB
+    mov R0,A ;Load pointer to MSB to R0
+    mov A,@R0 ;Load MSB to A
+    cpl A ;Complement A
+    jb7 check_sign_done ;If sign bit is not set, finish
+    >movr R0,R5 ;Load pointer to second value to R0
+    call neg_32bit ;Change sign of value
+    cpl F1 ;Complement sign flag
+check_sign_done:
+    ret
