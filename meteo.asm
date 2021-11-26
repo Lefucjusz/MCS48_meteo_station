@@ -100,6 +100,7 @@ bmp280_compute_compensation:
     mov R5,#tmp1
     mov R6,#3
     call shr_32bit ;tmp1 = temp_read>>3
+    cpl F0 ;Perform unsigned sign extension
     mov R0,#tmp2
     mov R1,#cal_T1
     mov R6,#2
@@ -110,6 +111,7 @@ bmp280_compute_compensation:
     mov R0,#tmp1
     mov R1,#tmp2
     call sub_32bit ;tmp1 = temp_read>>3 - cal_T1<<1
+    clr F0 ;Perform signed sign extension
     mov R0,#tmp2
     mov R1,#cal_T2
     mov R6,#2
@@ -118,7 +120,7 @@ bmp280_compute_compensation:
     mov R4,#tmp1
     mov R5,#tmp2
     call mul_32bit ;tmp3 = (temp_read>>3 - cal_T1<<1) * cal_T2
-    clr F0 ;Perform signed shift
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp3
     mov R6,#11
     call shr_32bit ;tmp3 = ((temp_read>>3 - cal_T1<<1) * cal_T2) >> 11
@@ -128,16 +130,17 @@ bmp280_compute_compensation:
     mov R6,#4
     call copy_32bit ;Copy 4 bytes, tmp1 = temp_read
 
-    clr F0 ;Perform signed shift
+    ;clr F0 ;Perform signed shift, flag already cleared
     mov R5,#tmp1
     mov R6,#4
     call shr_32bit ;tmp1 = temp_read>>4
 
+    cpl F0 ;Perform unsigned sign extension
     mov R0,#tmp2
     mov R1,#cal_T1
     mov R6,#2
     call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
-
+   
     mov R0,#tmp1
     mov R1,#tmp2
     call sub_32bit ;tmp1 = temp_read>>4 - cal_T1
@@ -157,6 +160,7 @@ bmp280_compute_compensation:
     mov R6,#12
     call shr_32bit ;tmp4 = ((temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)) >> 12
 
+    ;clr F0 ;Perform signed sign extension, flag already cleared
     mov R0,#tmp1
     mov R1,#cal_T3
     mov R6,#2
@@ -168,8 +172,8 @@ bmp280_compute_compensation:
     call mul_32bit ;tmp2 = (((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3
     ret
 
-
-    clr F0 ;Perform signed shift
+    
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it 
     mov R5,#tmp2
     mov R6,#14
     call shr_32bit ;tmp2 = ((((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3) >> 14
@@ -271,10 +275,26 @@ zero_32bit_loop:
     djnz R7,zero_32bit_loop ;Repeat for every byte
     ret
 
+;R0 - pointer to value to be filled, uses and destroys R0,R7
+fill_32bit:
+    clr A ;Clear A
+    cpl A ;Complement A
+    mov R7,#4 ;Load loop counter
+fill_32bit_loop:
+    mov @R0,A ;Load A = FF to byte
+    inc R0 ;Move pointer to next byte
+    djnz R7,fill_32bit_loop ;Repeat for every byte
+    ret
+
 ;F0 - signedness, if set, unsigned, R0 - pointer to destination, R1 - pointer to source, R6 - number of bytes to copy, uses F0,R0,R1,R5,R6,R7, destroys R0,R1,R5,R6,R7
 copy_32bit:
-    >movr R5,R0 ;Preserve R0 in R5, as zero_32bit will change R0 value
-    call zero_32bit ;Clear destination
+    >movr R5,R0 ;Preserve R0 in R5, as zero/fill will change R0 value
+    jf0 copy_32bit_unsigned ;If flag set
+    call fill_32bit ;Perform sign extension for signed value
+    jmp copy_32bit_continue ;Continue with algorithm
+copy_32bit_unsigned:
+    call zero_32bit ;Perform sign extension for unsigned value
+copy_32bit_continue:
     >movr R0,R5 ;Restore R0 from R5
 copy_32bit_loop:
     mov A,@R1
