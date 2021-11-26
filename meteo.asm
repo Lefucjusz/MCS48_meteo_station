@@ -62,7 +62,7 @@ main:
     call load_cal_data
     call bmp280_compute_compensation
 
-    mov A,#tmp2
+    mov A,#temp_real
     add A,#3
     mov R1,A
     mov A,@R1
@@ -91,179 +91,49 @@ loop:
 
 ;Subroutines
 
-bmp280_compute_compensation:
-    mov R0,#tmp1
-    mov R1,#temp_read
-    mov R6,#4
-    call copy_32bit ;Copy 4 bytes, tmp1 = temp_read
-    clr F0 ;Perform signed shift
-    mov R5,#tmp1
-    mov R6,#3
-    call shr_32bit ;tmp1 = temp_read>>3
-    cpl F0 ;Perform unsigned sign extension
-    mov R0,#tmp2
-    mov R1,#cal_T1
-    mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
-    mov R5,#tmp2
-    mov R6,#1
-    call shl_32bit ;tmp2 = cal_T1<<1
-    mov R0,#tmp1
-    mov R1,#tmp2
-    call sub_32bit ;tmp1 = temp_read>>3 - cal_T1<<1
-    clr F0 ;Perform signed sign extension
-    mov R0,#tmp2
-    mov R1,#cal_T2
-    mov R6,#2
-    call copy_32bit ;Copy 2 bytes, tmp2 = cal_T2
-    mov R3,#tmp3
-    mov R4,#tmp1
-    mov R5,#tmp2
-    call mul_32bit ;tmp3 = (temp_read>>3 - cal_T1<<1) * cal_T2
-    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
-    mov R5,#tmp3
-    mov R6,#11
-    call shr_32bit ;tmp3 = ((temp_read>>3 - cal_T1<<1) * cal_T2) >> 11
+;R0	- byte to send, uses R0,R6,R7
+uart_write_byte:
+	mov R6,#8 ;Load bit counter	
+	mov A,R0 ;Move byte to be send to A	
+	anl P2,#~tx ;Set tx pin low - start bit
+	call delay_100us
+uart_write_loop:
+	jb0 uart_write_one ;Check if LSB of A is set
+	anl P2,#~tx ;Set tx pin low
+	jmp uart_write_delay	
+uart_write_one:
+	orl P2,#tx ;Set tx pin high
+uart_write_delay:
+	call delay_100us
+	rr A ;Shift byte one bit right
+	djnz R6,uart_write_loop
 
-    mov R0,#tmp1
-    mov R1,#temp_read
-    mov R6,#4
-    call copy_32bit ;Copy 4 bytes, tmp1 = temp_read
-
-    ;clr F0 ;Perform signed shift, flag already cleared
-    mov R5,#tmp1
-    mov R6,#4
-    call shr_32bit ;tmp1 = temp_read>>4
-
-    cpl F0 ;Perform unsigned sign extension
-    mov R0,#tmp2
-    mov R1,#cal_T1
-    mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
-   
-    mov R0,#tmp1
-    mov R1,#tmp2
-    call sub_32bit ;tmp1 = temp_read>>4 - cal_T1
-
-    mov R0,#tmp2
-    mov R1,#tmp1
-    mov R6,#4
-    call copy_32bit ;Copy 4 bytes, tmp2 = tmp1 = temp_read>>4 - cal_T1
-
-    mov R3,#tmp4
-    mov R4,#tmp1
-    mov R5,#tmp2
-    call mul_32bit ;tmp4 = (temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)
-
-    clr F0 ;Perform signed shift
-    mov R5,#tmp4
-    mov R6,#12
-    call shr_32bit ;tmp4 = ((temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)) >> 12
-
-    ;clr F0 ;Perform signed sign extension, flag already cleared
-    mov R0,#tmp1
-    mov R1,#cal_T3
-    mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_T3 (16-bit)
-
-    mov R3,#tmp2
-    mov R4,#tmp4
-    mov R5,#tmp1
-    call mul_32bit ;tmp2 = (((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3
-    ret
-
+	orl P2,#tx ;Set tx pin high - stop bit
+	call delay_100us
+	ret
     
-    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it 
-    mov R5,#tmp2
-    mov R6,#14
-    call shr_32bit ;tmp2 = ((((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3) >> 14
+;~100uS delay, uses R7
+delay_100us:
+	mov R7,#28
+delay_100us_loop:
+	djnz R7,delay_500us_loop
+	ret
 
-    ; mov R4,#tmp3
-    ; ;mov R5,#tmp2 ;R5 is already loaded with tmp2
-    ; call add_32bit ;tmp3 = t_fine = var1 + var2, see BMP280 datasheet
+;~500uS delay, uses R7
+delay_500us:
+	mov R7,#164
+delay_500us_loop:
+	djnz R7,delay_500us_loop
+	ret
 
-    ; mov R4,#tmp1
-    ; call zero_32bit
-    ; mov R0,#tmp1
-    ; mov @R0,#5 ;tmp1 = 5
-
-    ; mov R3,#temp_real
-    ; ; mov R4,#tmp1 ;R4 is already loaded with tmp1
-    ; mov R5,#tmp3
-    ; call mul_32bit ;temp_real = t_fine * 5
-
-    ; mov R4,#tmp1
-    ; call zero_32bit
-    ; mov R0,#tmp1
-    ; mov @R0,#128 ;tmp1 = 128
-
-    ; mov R4,#temp_real
-    ; mov R5,#tmp1
-    ; call add_32bit ;temp_real = t_fine * 5 + 128
-
-    ret
-
-load_cal_data:
-    mov R0,#cal_T1
-    mov @R0,#$70
-    inc R0
-    mov @R0,#$6B
-
-    mov R0,#cal_T2
-    mov @R0,#$43
-    inc R0
-    mov @R0,#$67
-
-    mov R0,#cal_T3
-    mov @R0,#$18
-    inc R0
-    mov @R0,#$FC
-
-    mov R0,#cal_P1
-    mov @R0,#$7D
-    inc R0
-    mov @R0,#$8E
-
-    mov R0,#cal_P2
-    mov @R0,#$43
-    inc R0
-    mov @R0,#$D6
-
-    mov R0,#cal_P3
-    mov @R0,#$D0
-    inc R0
-    mov @R0,#$0B
-
-    mov R0,#cal_P4
-    mov @R0,#$27
-    inc R0
-    mov @R0,#$0B
-
-    mov R0,#cal_P5
-    mov @R0,#$8C
-    inc R0
-    mov @R0,#$00
-
-    mov R0,#cal_P6
-    mov @R0,#$F9
-    inc R0
-    mov @R0,#$FF
-
-    mov R0,#cal_P7
-    mov @R0,#$8C
-    inc R0
-    mov @R0,#$3C
-
-    mov R0,#cal_P8
-    mov @R0,#$F8
-    inc R0
-    mov @R0,#$C6
-
-    mov R0,#cal_P9
-    mov @R0,#$70
-    inc R0
-    mov @R0,#$17
-    ret
+;R6 - delay time in msec, uses R6,R7
+delay_ms:
+	mov R7,#228
+delay_ms_loop:
+	nop
+	djnz R7,delay_ms_loop
+	djnz R6,delay_ms
+	ret
 
 ;R0 - pointer to value to be zeroed, uses and destroys R0,R7
 zero_32bit:
@@ -288,13 +158,22 @@ fill_32bit_loop:
 
 ;F0 - signedness, if set, unsigned, R0 - pointer to destination, R1 - pointer to source, R6 - number of bytes to copy, uses F0,R0,R1,R5,R6,R7, destroys R0,R1,R5,R6,R7
 copy_32bit:
-    >movr R5,R0 ;Preserve R0 in R5, as zero/fill will change R0 value
-    jf0 copy_32bit_unsigned ;If flag set
+    >movr R5,R0 ;Preserve R0 in R5
+    >movr R4,R1 ;Preserve R1 in R4
+    jf0 copy_32bit_unsigned ;If flag set, unsigned
+    mov A,R1 ;Load pointer to source to A
+    add A,R6
+    dec A ;Move pointer to MSB
+    mov R1,A ;Store value back in register
+    mov A,@R1 ;Load MSB to A
+    cpl A ;Complement A
+    jb7 copy_32bit_unsigned ;If sign bit not set, value is positive, sign extension as for unsigned
     call fill_32bit ;Perform sign extension for signed value
     jmp copy_32bit_continue ;Continue with algorithm
 copy_32bit_unsigned:
     call zero_32bit ;Perform sign extension for unsigned value
 copy_32bit_continue:
+    >movr R1,R4 ;Restore R1 from R4
     >movr R0,R5 ;Restore R0 from R5
 copy_32bit_loop:
     mov A,@R1
@@ -474,47 +353,163 @@ check_sign_first_pos:
 check_sign_done:
     ret
 
-;R0	- byte to send, uses R0,R6,R7
-uart_write_byte:
-	mov R6,#8 ;Load bit counter	
-	mov A,R0 ;Move byte to be send to A	
-	anl P2,#~tx ;Set tx pin low - start bit
-	call delay_100us
-uart_write_loop:
-	jb0 uart_write_one ;Check if LSB of A is set
-	anl P2,#~tx ;Set tx pin low
-	jmp uart_write_delay	
-uart_write_one:
-	orl P2,#tx ;Set tx pin high
-uart_write_delay:
-	call delay_100us
-	rr A ;Shift byte one bit right
-	djnz R6,uart_write_loop
+bmp280_compute_compensation:
+    mov R0,#tmp1
+    mov R1,#temp_read
+    mov R6,#4
+    call copy_32bit ;Copy 4 bytes, tmp1 = temp_read
+    clr F0 ;Perform signed shift
+    mov R5,#tmp1
+    mov R6,#3
+    call shr_32bit ;tmp1 = temp_read>>3
+    cpl F0 ;Perform unsigned sign extension
+    mov R0,#tmp2
+    mov R1,#cal_T1
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
+    mov R5,#tmp2
+    mov R6,#1
+    call shl_32bit ;tmp2 = cal_T1<<1
+    mov R0,#tmp1
+    mov R1,#tmp2
+    call sub_32bit ;tmp1 = temp_read>>3 - cal_T1<<1
+    clr F0 ;Perform signed sign extension
+    mov R0,#tmp2
+    mov R1,#cal_T2
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes, tmp2 = cal_T2
+    mov R3,#tmp3
+    mov R4,#tmp1
+    mov R5,#tmp2
+    call mul_32bit ;tmp3 = (temp_read>>3 - cal_T1<<1) * cal_T2
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
+    mov R5,#tmp3
+    mov R6,#11
+    call shr_32bit ;tmp3 = ((temp_read>>3 - cal_T1<<1) * cal_T2) >> 11
 
-	orl P2,#tx ;Set tx pin high - stop bit
-	call delay_100us
-	ret
+    mov R0,#tmp1
+    mov R1,#temp_read
+    mov R6,#4
+    call copy_32bit ;Copy 4 bytes, tmp1 = temp_read
+    ;Perform signed shift, flag already cleared
+    mov R5,#tmp1
+    mov R6,#4
+    call shr_32bit ;tmp1 = temp_read>>4
+    cpl F0 ;Perform unsigned sign extension
+    mov R0,#tmp2
+    mov R1,#cal_T1
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
+    mov R0,#tmp1
+    mov R1,#tmp2
+    call sub_32bit ;tmp1 = temp_read>>4 - cal_T1
+    mov R0,#tmp2
+    mov R1,#tmp1
+    mov R6,#4
+    call copy_32bit ;Copy 4 bytes, tmp2 = tmp1 = temp_read>>4 - cal_T1
+    mov R3,#tmp4
+    mov R4,#tmp1
+    mov R5,#tmp2
+    call mul_32bit ;tmp4 = (temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)
+    clr F0 ;Perform signed shift
+    mov R5,#tmp4
+    mov R6,#12
+    call shr_32bit ;tmp4 = ((temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)) >> 12
+    ;Perform signed sign extension, flag already cleared
+    mov R0,#tmp1
+    mov R1,#cal_T3
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_T3 (16-bit)
+    mov R3,#tmp2
+    mov R4,#tmp4
+    mov R5,#tmp1
+    call mul_32bit ;tmp2 = (((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it 
+    mov R5,#tmp2
+    mov R6,#14
+    call shr_32bit ;tmp2 = ((((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3) >> 14
+    mov R0,#tmp3
+    mov R1,#tmp2
+    call add_32bit ;tmp3 = t_fine = var1 + var2, see BMP280 datasheet
+    mov R0,#tmp1
+    call zero_32bit
+    mov R0,#tmp1
+    mov @R0,#5 ;tmp1 = 5
+    mov R3,#temp_real
+    mov R4,#tmp3
+    mov R5,#tmp1
+    call mul_32bit ;temp_real = t_fine * 5
+    mov R0,#tmp1
+    call zero_32bit
+    mov R0,#tmp1
+    mov @R0,#128 ;tmp1 = 128
+    mov R0,#temp_real
+    mov R1,#tmp1
+    call add_32bit ;temp_real = t_fine * 5 + 128
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it 
+    mov R5,#temp_real
+    mov R6,#8
+    call shr_32bit ;temp_real = (t_fine * 5 + 128) >> 8
+    ret
 
-;~100uS delay, uses R7
-delay_100us:
-	mov R7,#28
-delay_100us_loop:
-	djnz R7,delay_500us_loop
-	ret
+load_cal_data:
+    mov R0,#cal_T1
+    mov @R0,#$70
+    inc R0
+    mov @R0,#$6B
 
-;~500uS delay, uses R7
-delay_500us:
-	mov R7,#164
-delay_500us_loop:
-	djnz R7,delay_500us_loop
-	ret
+    mov R0,#cal_T2
+    mov @R0,#$43
+    inc R0
+    mov @R0,#$67
 
-;R6 - delay time in msec, uses R6,R7
-delay_ms:
-	mov R7,#228
-delay_ms_loop:
-	nop
-	djnz R7,delay_ms_loop
-	djnz R6,delay_ms
-	ret
+    mov R0,#cal_T3
+    mov @R0,#$18
+    inc R0
+    mov @R0,#$FC
 
+    mov R0,#cal_P1
+    mov @R0,#$7D
+    inc R0
+    mov @R0,#$8E
+
+    mov R0,#cal_P2
+    mov @R0,#$43
+    inc R0
+    mov @R0,#$D6
+
+    mov R0,#cal_P3
+    mov @R0,#$D0
+    inc R0
+    mov @R0,#$0B
+
+    mov R0,#cal_P4
+    mov @R0,#$27
+    inc R0
+    mov @R0,#$0B
+
+    mov R0,#cal_P5
+    mov @R0,#$8C
+    inc R0
+    mov @R0,#$00
+
+    mov R0,#cal_P6
+    mov @R0,#$F9
+    inc R0
+    mov @R0,#$FF
+
+    mov R0,#cal_P7
+    mov @R0,#$8C
+    inc R0
+    mov @R0,#$3C
+
+    mov R0,#cal_P8
+    mov @R0,#$F8
+    inc R0
+    mov @R0,#$C6
+
+    mov R0,#cal_P9
+    mov @R0,#$70
+    inc R0
+    mov @R0,#$17
+    ret
