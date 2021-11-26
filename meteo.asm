@@ -5,34 +5,33 @@
 	.lf	meteo.lst
 ;==================Defines=====================
 ;Pins
-
-;Fixed purpose registers/flags
+tx  .eq %10000000 ;Tx pin at P2.7
 
 ;RAM variables, little endian
-cal_T1  .eq $20 ;16-bit
-cal_T2  .eq $22 ;16-bit
-cal_T3  .eq $24 ;16-bit
-cal_P1  .eq $26 ;16-bit
-cal_P2  .eq $28 ;16-bit
-cal_P3  .eq $2A ;16-bit
-cal_P4  .eq $2C ;16-bit
-cal_P5  .eq $2E ;16-bit
-cal_P6  .eq $30 ;16-bit
-cal_P7  .eq $32 ;16-bit
-cal_P8  .eq $34 ;16-bit
-cal_P9  .eq $36 ;16-bit
+tmp_neg .eq $20 ;32-bit
 
-temp_adc    .eq $38 ;32-bit
-temp_real   .eq $3C ;32-bit
-pres_adc    .eq $40 ;32-bit
-pres_real   .eq $44 ;32-bit
+cal_T1  .eq $24 ;16-bit
+cal_T2  .eq $26 ;16-bit
+cal_T3  .eq $28 ;16-bit
+cal_P1  .eq $2A ;16-bit
+cal_P2  .eq $2C ;16-bit
+cal_P3  .eq $2E ;16-bit
+cal_P4  .eq $30 ;16-bit
+cal_P5  .eq $32 ;16-bit
+cal_P6  .eq $34 ;16-bit
+cal_P7  .eq $36 ;16-bit
+cal_P8  .eq $38 ;16-bit
+cal_P9  .eq $3A ;16-bit
 
-tmp1    .eq $48 ;32-bit
-tmp2    .eq $4C ;32-bit
-tmp3    .eq $50 ;32-bit
-tmp4    .eq $54 ;32-bit
+temp_read   .eq $3C ;32-bit
+temp_real   .eq $40 ;32-bit
+pres_read   .eq $44 ;32-bit
+pres_real   .eq $48 ;32-bit
 
-tmp_neg .eq $58 ;32-bit
+tmp1    .eq $4C ;32-bit
+tmp2    .eq $50 ;32-bit
+tmp3    .eq $54 ;32-bit
+tmp4    .eq $58 ;32-bit
 
 ;Macros
 swap    .ma Rx,Ry ;Swaps two registers
@@ -50,28 +49,39 @@ movr    .ma Rx,Ry ;Moves Ry to Rx (Rx = Ry)
 	.no $00 ;Set jump to main at reset vector (00h)
 	jmp main
 
-main:
-    call lcd_init
-    
-    mov R1,#1
-    mov R0,#'R'
-    call lcd_write
-    mov R0,#'e'
-    call lcd_write
-    mov R0,#'s'
-    call lcd_write
-    mov R0,#'u'
-    call lcd_write
-    mov R0,#'l'
-    call lcd_write
-    mov R0,#'t'
-    call lcd_write
-    mov R0,#':'
-    call lcd_write
-    mov R0,#' '
-    call lcd_write
+text    .az /Siema eniu!/
 
-    ; mov R0,#temp_adc
+main:
+    mov R2,#text
+send:
+    mov A,R2
+    movp A,@A
+    jz loop
+    mov R0,A
+    call uart_write_byte
+    inc R2
+    jmp send
+    ; call lcd_init
+    
+    ; mov R1,#1
+    ; mov R0,#'R'
+    ; call lcd_write
+    ; mov R0,#'e'
+    ; call lcd_write
+    ; mov R0,#'s'
+    ; call lcd_write
+    ; mov R0,#'u'
+    ; call lcd_write
+    ; mov R0,#'l'
+    ; call lcd_write
+    ; mov R0,#'t'
+    ; call lcd_write
+    ; mov R0,#':'
+    ; call lcd_write
+    ; mov R0,#' '
+    ; call lcd_write
+
+    ; mov R0,#temp_read
     ; mov @R0,#$D0
     ; inc R0
     ; mov @R0,#$EE
@@ -80,78 +90,35 @@ main:
     ; inc R0
     ; mov @R0,#$00
 
-    mov R0,#tmp1
-    mov @R0,#$55
-    inc R0
-    mov @R0,#$44
-    inc R0
-    mov @R0,#$33
-    inc R0
-    mov @R0,#$22
-
-    mov R0,#tmp2
-    mov @R0,#$FE
-    inc R0
-    mov @R0,#$FF
-    inc R0
-    mov @R0,#$FF
-    inc R0
-    mov @R0,#$FF
-
     ; call load_cal_data
     ; call bmp280_compute_compensation
 
-    ; mov R3,#tmp1
-    ; mov R4,#tmp2
-    ; call sub_32bit
-
-    mov R3,#tmp3
-    mov R4,#tmp2
-    mov R5,#tmp1
-    call div_32bit
-   
-
     ; mov R1,#1
-    ; mov A,R3
+    ; mov R0,#tmp3
+    ; mov A,@R0
     ; mov R0,A
     ; call lcd_write
 
-    ; mov R1,#1
-    ; mov A,R4
+    ; mov R0,#tmp3
+    ; inc R0
+    ; mov A,@R0
     ; mov R0,A
     ; call lcd_write
 
-    ; mov R1,#1
-    ; mov A,R5
+    ; mov R0,#tmp3
+    ; inc R0
+    ; inc R0
+    ; mov A,@R0
     ; mov R0,A
     ; call lcd_write
 
-    mov R1,#1
-    mov R0,#tmp1
-    mov A,@R0
-    mov R0,A
-    call lcd_write
-
-    mov R0,#tmp1
-    inc R0
-    mov A,@R0
-    mov R0,A
-    call lcd_write
-
-    mov R0,#tmp1
-    inc R0
-    inc R0
-    mov A,@R0
-    mov R0,A
-    call lcd_write
-
-    mov R0,#tmp1
-    inc R0
-    inc R0
-    inc R0
-    mov A,@R0
-    mov R0,A
-    call lcd_write
+    ; mov R0,#tmp3
+    ; inc R0
+    ; inc R0
+    ; inc R0
+    ; mov A,@R0
+    ; mov R0,A
+    ; call lcd_write
 loop:
 	jmp loop
 
@@ -159,64 +126,64 @@ loop:
 
 ;Subroutines
 
-bmp280_compute_compensation:
-    ; mov R3,#tmp1
-    ; mov R4,#temp_adc
-    ; mov R6,#4
-    ; call copy_32bit ;Copy 4 bytes, tmp1 = temp_adc
-    ; clr F0 ;Perform signed shift
-    ; mov R5,#tmp1
-    ; mov R6,#3
-    ; call shr_32bit ;tmp1 = temp_adc>>3
-    ; mov R3,#tmp2
-    ; mov R4,#cal_T1
-    ; mov R6,#2
-    ; call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
-    ; mov R5,#tmp2
-    ; mov R6,#1
-    ; call shl_32bit ;tmp2 = cal_T1<<1    
-    ; mov R3,#tmp1
-    ; mov R4,#tmp2
-    ; call sub_32bit ;tmp1 = temp_adc>>3 - cal_T1<<1    
-    ; mov R3,#tmp2
-    ; mov R4,#cal_T2
-    ; mov R6,#2
-    ; call copy_32bit ;Copy 2 bytes, tmp2 = cal_T2
-    ; mov R3,#tmp3
-    ; mov R4,#tmp1
-    ; mov R5,#tmp2
-    ; call mul_32bit ;tmp3 = (temp_adc>>3 - cal_T1<<1) * cal_T2
-    ; clr F0 ;Perform signed shift
-    ; mov R5,#tmp3
-    ; mov R6,#11
-    ; call shr_32bit ;tmp3 = ((temp_adc>>3 - cal_T1<<1) * cal_T2) >> 11
+; bmp280_compute_compensation:
+;     mov R0,#tmp1
+;     mov R1,#temp_read
+;     mov R7,#4
+;     call copy_32bit ;Copy 4 bytes, tmp1 = temp_read
+;     clr F0 ;Perform signed shift
+;     mov R5,#tmp1
+;     mov R6,#3
+;     call shr_32bit ;tmp1 = temp_read>>3
+;     mov R0,#tmp2
+;     mov R1,#cal_T1
+;     mov R7,#2
+;     call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
+;     mov R5,#tmp2
+;     mov R6,#1
+;     call shl_32bit ;tmp2 = cal_T1<<1
+;     mov R0,#tmp1
+;     mov R1,#tmp2
+;     call sub_32bit ;tmp1 = temp_read>>3 - cal_T1<<1
+;     mov R0,#tmp2
+;     mov R1,#cal_T2
+;     mov R7,#2
+;     call copy_32bit ;Copy 2 bytes, tmp2 = cal_T2
+;     mov R3,#tmp3
+;     mov R4,#tmp1
+;     mov R5,#tmp2
+;     call mul_32bit ;tmp3 = (temp_read>>3 - cal_T1<<1) * cal_T2
+;     clr F0 ;Perform signed shift
+;     mov R5,#tmp3
+;     mov R6,#11
+;     call shr_32bit ;tmp3 = ((temp_read>>3 - cal_T1<<1) * cal_T2) >> 11
     
     ; mov R4,#tmp1
-    ; mov R5,#temp_adc
+    ; mov R5,#temp_read
     ; mov R6,#4
-    ; call copy_mem ;Copy 4 bytes, tmp1 = temp_adc
+    ; call copy_mem ;Copy 4 bytes, tmp1 = temp_read
     ; mov R5,#tmp1
     ; mov R6,#4
-    ; call shr_32bit ;tmp1 = temp_adc>>4
+    ; call shr_32bit ;tmp1 = temp_read>>4
     ; mov R4,#tmp2
     ; mov R5,#cal_T1
     ; mov R6,#2
     ; call copy_mem ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
     ; mov R4,#tmp1
     ; mov R5,#tmp2
-    ; call sub_32bit ;tmp1 = temp_adc>>4 - cal_T1
+    ; call sub_32bit ;tmp1 = temp_read>>4 - cal_T1
     ; mov R4,#tmp2
     ; mov R5,#tmp1
     ; mov R6,#4
-    ; call copy_mem ;Copy 4 bytes, tmp2 = tmp1 = temp_adc>>4 - cal_T1
+    ; call copy_mem ;Copy 4 bytes, tmp2 = tmp1 = temp_read>>4 - cal_T1
     ; mov R3,#tmp4
     ; mov R4,#tmp1
     ; mov R5,#tmp2
-    ; call mul_32bit ;tmp4 = (temp_adc>>4 - cal_T1) * (temp_adc>>4 - cal_T1)
+    ; call mul_32bit ;tmp4 = (temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)
     ; mov R5,#tmp4
     ; mov R6,#12
     ; clr F0 ;Clear F0 again, it was set in mul_32bit
-    ; call shr_32bit ;tmp4 = ((temp_adc>>4 - cal_T1) * (temp_adc>>4 - cal_T1)) >> 12
+    ; call shr_32bit ;tmp4 = ((temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)) >> 12
     ; mov R4,#tmp1
     ; mov R5,#cal_T3
     ; mov R6,#2
@@ -224,14 +191,14 @@ bmp280_compute_compensation:
     ; mov R3,#tmp2
     ; ; mov R4,#tmp1 ;R4 is already loaded with tmp1
     ; mov R5,#tmp4
-    ; call mul_32bit ;tmp2 = (((temp_adc>>4 - cal_T1)*(temp_adc>>4 - cal_T1)) >> 12) * cal_T3
+    ; call mul_32bit ;tmp2 = (((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3
     ; ret
 
 
     ; mov R5,#tmp2
     ; mov R6,#14
     ; clr F0 ;Clear F0 again, it was set in mul_32bit
-    ; call shr_32bit ;tmp2 = ((((temp_adc>>4 - cal_T1)*(temp_adc>>4 - cal_T1)) >> 12) * cal_T3) >> 14
+    ; call shr_32bit ;tmp2 = ((((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3) >> 14
     ; mov R4,#tmp3
     ; ;mov R5,#tmp2 ;R5 is already loaded with tmp2
     ; call add_32bit ;tmp3 = t_fine = var1 + var2, see BMP280 datasheet
@@ -258,178 +225,66 @@ bmp280_compute_compensation:
     ret
 
 load_cal_data:
-    ; mov R0,#cal_T1
-    ; mov @R0,#$70
-    ; inc R0
-    ; mov @R0,#$6B
+    mov R0,#cal_T1
+    mov @R0,#$70
+    inc R0
+    mov @R0,#$6B
 
-    ; mov R0,#cal_T2
-    ; mov @R0,#$43
-    ; inc R0
-    ; mov @R0,#$67
+    mov R0,#cal_T2
+    mov @R0,#$43
+    inc R0
+    mov @R0,#$67
 
-    ; mov R0,#cal_T3
-    ; mov @R0,#$18
-    ; inc R0
-    ; mov @R0,#$FC
+    mov R0,#cal_T3
+    mov @R0,#$18
+    inc R0
+    mov @R0,#$FC
 
-    ; mov R0,#cal_P1
-    ; mov @R0,#$7D
-    ; inc R0
-    ; mov @R0,#$8E
+    mov R0,#cal_P1
+    mov @R0,#$7D
+    inc R0
+    mov @R0,#$8E
 
-    ; mov R0,#cal_P2
-    ; mov @R0,#$43
-    ; inc R0
-    ; mov @R0,#$D6
+    mov R0,#cal_P2
+    mov @R0,#$43
+    inc R0
+    mov @R0,#$D6
 
-    ; mov R0,#cal_P3
-    ; mov @R0,#$D0
-    ; inc R0
-    ; mov @R0,#$0B
+    mov R0,#cal_P3
+    mov @R0,#$D0
+    inc R0
+    mov @R0,#$0B
 
-;     mov R0,#cal_P4
-;     mov @R0,#$27
-;     inc R0
-;     mov @R0,#$0B
+    mov R0,#cal_P4
+    mov @R0,#$27
+    inc R0
+    mov @R0,#$0B
 
-;     mov R0,#cal_P5
-;     mov @R0,#$8C
-;     inc R0
-;     mov @R0,#$00
+    mov R0,#cal_P5
+    mov @R0,#$8C
+    inc R0
+    mov @R0,#$00
 
-;     mov R0,#cal_P6
-;     mov @R0,#$F9
-;     inc R0
-;     mov @R0,#$FF
+    mov R0,#cal_P6
+    mov @R0,#$F9
+    inc R0
+    mov @R0,#$FF
 
-;     mov R0,#cal_P7
-;     mov @R0,#$8C
-;     inc R0
-;     mov @R0,#$3C
+    mov R0,#cal_P7
+    mov @R0,#$8C
+    inc R0
+    mov @R0,#$3C
 
-;     mov R0,#cal_P8
-;     mov @R0,#$F8
-;     inc R0
-;     mov @R0,#$C6
+    mov R0,#cal_P8
+    mov @R0,#$F8
+    inc R0
+    mov @R0,#$C6
 
-;     mov R0,#cal_P9
-;     mov @R0,#$70
-;     inc R0
-;     mov @R0,#$17
-;     ret
-
-;R6 - delay time in msec, uses R6,R7
-delay_ms:
-	mov R7,#146
-delay_ms_loop:
-	nop
-	nop
-	djnz R7,delay_ms_loop
-	djnz R6,delay_ms
-	ret
-
-;~500uS delay, uses R7
-delay_500us:
-	mov R7,#71
-delay_500us_loop:
-	nop
-	nop
-	djnz R7,delay_500us_loop
-	ret
-
-;R0 - byte, R1 - cmd/data switch, uses R0,R1
-lcd_write:
-	anl P2,#%11011111 ;Clear RS
-	;Test whether data or cmd will be sent
-	mov A,R1 ;Load R1 to A to test if zero
-	jz skip_rs ;Skip RS line setting - cmd will be sent
-	orl P2,#%00100000 ;Set RS line - data will be sent
-skip_rs:
-	;Send upper nibble
-	mov A,R0 ;Load byte to A
-	anl A,#%11110000 ;Mask lower nibble
-	outl P1,A ;Send data to P1
-	
-	orl P2,#%00010000 ;Set E line
-	call delay_500us ;Wait for LCD	
-	anl P2,#%11101111 ;Clear E line
-	call delay_500us ;Wait for LCD
-	
-	;Send lower nibble
-	mov A,R0 ;Load byte to A
-	swap A ;Swap nibbles
-	anl A,#%11110000 ;Mask lower nibble
-	outl P1,A ;Send data to P1
-	
-	orl P2,#%00010000 ;Set E line
-	call delay_500us ;Wait for LCD	
-	anl P2,#%11101111 ;Clear E line
-	call delay_500us ;Wait for LCD	
-	ret
-	
-;R0 - y, R1 - x, uses R0,R1	
-lcd_gotoxy:
-	mov A,R1
-	jnz second_row ;Check row
-	mov A,#$80 ;If first, load address of its first position
-	jmp lcd_gotoxy_write
-second_row:
-	mov A,#$C0 ;If second, load address of its first position
-lcd_gotoxy_write:
-	add A,R0 ;Add offset (y)
-	mov R0,A
-	mov R1,#0
-	call lcd_write ;Send command
-	ret
-	
-;Uses R0,R1,R6,R7	
-lcd_init:
-	mov R1,#0 ;Whole subroutine will be sending commands
-	
-	mov R0,#$30	
-	call lcd_write ;Weird 4-bit init command first time...
-	mov R6,#5
-	call delay_ms ;Wait 5ms
-	
-	mov R0,#$30
-	call lcd_write ;Weird repeated 4-bit init command second time...
-	mov R6,#1
-	call delay_ms ;Wait 1ms
-	
-	mov R0,#$30
-	call lcd_write ;Weird repeated 4-bit init command third time...
-	mov R6,#1
-	call delay_ms ;Wait 1ms
-
-	mov R0,#$02
-	call lcd_write ;Init 4-bit mode
-	
-	mov R0,#$28
-	call lcd_write ;2 lines, 5*8 matrix, 4-bit
-	
-	mov R0,#$0C
-	call lcd_write ;Display on, cursor off
-	
-	mov R0,#$06
-	call lcd_write ;Autoincrement cursor position, text scroll off
-	
-	call lcd_cls ;Clear screen
-	ret
-	
-;Uses R0,R1,R6,R7	
-lcd_cls:
-	mov R1,#0
-	mov R0,#$01	
-	call lcd_write ;Clear display
-	mov R6,#1
-	call delay_ms ;Wait 1ms
-	
-	mov R0,#$80
-	call lcd_write ;Set cursor at first place in upper row
-	mov R6,#1
-	call delay_ms ;Wait 1ms
-	ret	
+    mov R0,#cal_P9
+    mov @R0,#$70
+    inc R0
+    mov @R0,#$17
+    ret
 
 ;R0 - pointer to value to be zeroed, uses and destroys R0,R7
 zero_32bit:
@@ -598,7 +453,7 @@ div_32bit_continue:
 div_32bit_end:
     ret
 
-;R4 - pointer to first value, R5 - pointer to second value, F1 - sign flag, if cleared, result sign has to be changed, uses F1,R0,R1,R4,R5,R7
+;R4 - pointer to first value, R5 - pointer to second value, F1 - sign flag, if cleared, result sign has to be changed, uses F1,R0,R1,R4,R5,R7, destroys F1,R0,R1,R7
 check_sign:
     clr F1
     cpl F1 ;Set sign flag
@@ -623,3 +478,49 @@ check_sign_first_pos:
     cpl F1 ;Complement sign flag
 check_sign_done:
     ret
+
+;R0	- byte to send, uses R0,R1,R6,R7
+uart_write_byte:
+	mov R6,#8 ;Load bit counter	
+	mov A,R0 ;Move byte to be send to A	
+	anl P2,#~tx ;Set tx pin low - start bit
+	call delay_100us
+uart_write_loop:
+	jb0 uart_write_one ;Check if LSB of A is set
+	anl P2,#~tx ;Set tx pin low
+	jmp uart_write_delay	
+uart_write_one:
+	orl P2,#tx ;Set tx pin high
+uart_write_delay:
+	call delay_100us
+	rr A ;Shift byte one bit right
+	djnz R6,uart_write_loop
+
+	orl P2,#tx ;Set tx pin high - stop bit
+	call delay_100us
+	ret
+
+;~100uS delay, uses R7
+delay_100us:
+	mov R7,#28
+delay_100us_loop:
+	djnz R7,delay_500us_loop
+	ret
+
+;~500uS delay, uses R7
+delay_500us:
+	mov R7,#164
+delay_500us_loop:
+	djnz R7,delay_500us_loop
+	ret
+
+;R6 - delay time in msec, uses R6,R7
+delay_ms:
+	mov R7,#248
+delay_ms_loop:
+	nop
+	nop
+	djnz R7,delay_ms_loop
+	djnz R6,delay_ms
+	ret
+
