@@ -60,10 +60,19 @@ main:
     inc R0
     mov @R0,#$00
 
-    call load_cal_data
-    call bmp280_compute_compensation
+    mov R0,#pres_read
+    mov @R0,#$AC
+    inc R0
+    mov @R0,#$55
+    inc R0
+    mov @R0,#$06
+    inc R0
+    mov @R0,#$00
 
-    mov A,#tmp4
+    call load_cal_data
+    call bmp280_compute
+
+    mov A,#tmp3
     add A,#3
     mov R1,A
     mov A,@R1
@@ -111,29 +120,6 @@ uart_write_delay:
 
 	orl P2,#tx ;Set tx pin high - stop bit
 	call delay_100us
-	ret
-    
-;~100uS delay, uses R7
-delay_100us:
-	mov R7,#28
-delay_100us_loop:
-	djnz R7,delay_500us_loop
-	ret
-
-;~500uS delay, uses R7
-delay_500us:
-	mov R7,#164
-delay_500us_loop:
-	djnz R7,delay_500us_loop
-	ret
-
-;R6 - delay time in msec, uses R6,R7
-delay_ms:
-	mov R7,#228
-delay_ms_loop:
-	nop
-	djnz R7,delay_ms_loop
-	djnz R6,delay_ms
 	ret
 
 ;R0 - pointer to value to be zeroed, uses and destroys R0,R7
@@ -354,7 +340,31 @@ check_sign_first_pos:
 check_sign_done:
     ret
 
-bmp280_compute_compensation:
+        
+;~100uS delay, uses R7
+delay_100us:
+	mov R7,#28
+delay_100us_loop:
+	djnz R7,delay_500us_loop
+	ret
+
+;~500uS delay, uses R7
+delay_500us:
+	mov R7,#164
+delay_500us_loop:
+	djnz R7,delay_500us_loop
+	ret
+
+;R6 - delay time in msec, uses R6,R7
+delay_ms:
+	mov R7,#228
+delay_ms_loop:
+	nop
+	djnz R7,delay_ms_loop
+	djnz R6,delay_ms
+	ret
+
+bmp280_compute:
     ;============ Temperature compensation ============
     mov R0,#tmp1
     mov R1,#temp_read
@@ -584,34 +594,75 @@ bmp280_compute_compensation:
     mov R5,#tmp4
     mov R6,#18
     call shr_32bit ;tmp4 = (cal_P3*((tmp4>>2)*(tmp4>>2)>>13) + (cal_P2*tmp4)>>1)>>18 (WTF Bosch, who the hell has come up with such equation...)
-
-    ;tmp2 = var2, tmp4 = var1
     mov R0,#tmp1
     call zero_32bit ;Clear tmp1
     mov R0,#tmp1
     inc R0
     mov @R0,#$80 ;tmp1 = 0x00008000 = 32768
-
     mov R0,#tmp1
     mov R1,#tmp4
     call add_32bit ;tmp1 = tmp4 + 32768
-
     cpl F0 ;Perform unsigned sign extension, flag was cleared so set it this comment is not true DEBUG
     mov R0,#tmp3
     mov R1,#cal_P1
     mov R6,#2
     call copy_32bit ;Copy 2 bytes - tmp3 (32-bit) = cal_P1 (16-bit)
-
     mov R3,#tmp4
     mov R4,#tmp1
     mov R5,#tmp3
     call mul_32bit ;tmp4 = tmp1*tmp3 = tmp1*cal_P1
-
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp4
     mov R6,#15
     call shr_32bit
+    mov R0,#tmp1
+    call zero_32bit ;Clear tmp1
+    mov R0,#tmp1
+    mov @R0,#1 ;tmp1 = 1
+    mov R0,#tmp4
+    mov R1,#tmp1
+    call sub_32bit ;tmp4 = tmp4 - 1 to check if tmp4 == 0
+    jnc bmp280_compute_not_zero ;If carry not set, tmp4 != 0
+    mov R0,#pres_real
+    call zero_32bit ;Set result to 0
+    ret ;Abort further steps to prevent division by 0; first exit point
+bmp280_compute_not_zero:
+    mov R0,#tmp4
+    mov R1,#tmp1
+    call add_32bit ;Revert tmp4 state after subtraction
+    mov R0,#tmp1
+    call zero_32bit ;Clear tmp1
+    mov R0,#tmp1
+    inc R0
+    inc R0
+    mov @R0,#$10 ;tmp1 = 0x00100000 = 1048576
+    mov R0,#tmp1
+    mov R1,#pres_read
+    call sub_32bit ;tmp1 = 1048576 - pres_read
+    ;Perform signed shift, flag already cleared
+    mov R5,#tmp2
+    mov R6,#12
+    call shr_32bit ;tmp2 = tmp2>>12
+    mov R0,#tmp1
+    mov R1,#tmp2
+    call sub_32bit ;tmp1 = (1048576 - pres_read) - (tmp2>>12)
+    mov R0,#tmp2
+    call zero_32bit ;Clear tmp2
+    mov R0,#tmp2
+    mov @R0,#$35
+    inc R0
+    mov @R0,#$0C ;tmp2 = 0x00000C35 = 3125
+    mov R3,#tmp3
+    mov R4,#tmp1
+    mov R5,#tmp2
+    call mul_32bit ;tmp3 = ((1048576 - pres_read) - (tmp2>>12))*3125
 
+    
+
+
+
+    ;Do not corrupt tmp4 = var1
+bmp280_compute_end:
     ret
 
 ;TODO maybe delete some of the zero_32bit, because registers might be cleaned by mul_32bit already, check if some registers aren't loaded already with proper content
