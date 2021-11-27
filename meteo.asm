@@ -32,6 +32,7 @@ tmp1    .eq $4C ;32-bit
 tmp2    .eq $50 ;32-bit
 tmp3    .eq $54 ;32-bit
 tmp4    .eq $58 ;32-bit
+tmp5    .eq $5C ;32-bit
 
 ;Macros
 swap    .ma Rx,Ry ;Swaps two registers
@@ -62,7 +63,7 @@ main:
     call load_cal_data
     call bmp280_compute_compensation
 
-    mov A,#temp_real
+    mov A,#tmp4
     add A,#3
     mov R1,A
     mov A,@R1
@@ -354,6 +355,7 @@ check_sign_done:
     ret
 
 bmp280_compute_compensation:
+    ;============ Temperature compensation ============
     mov R0,#tmp1
     mov R1,#temp_read
     mov R6,#4
@@ -386,7 +388,6 @@ bmp280_compute_compensation:
     mov R5,#tmp3
     mov R6,#11
     call shr_32bit ;tmp3 = ((temp_read>>3 - cal_T1<<1) * cal_T2) >> 11
-
     mov R0,#tmp1
     mov R1,#temp_read
     mov R6,#4
@@ -430,7 +431,11 @@ bmp280_compute_compensation:
     call shr_32bit ;tmp2 = ((((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3) >> 14
     mov R0,#tmp3
     mov R1,#tmp2
-    call add_32bit ;tmp3 = t_fine = var1 + var2, see BMP280 datasheet
+    call add_32bit ;tmp3 = tmp3 + tmp2
+    mov R0,#tmp4
+    mov R1,#tmp3
+    mov R6,#4
+    call copy_32bit ;tmp4 = tmp3, this value is needed during pressure compensation (t_fine, see BMP280 datasheet) so preserve it
     mov R0,#tmp1
     call zero_32bit
     mov R0,#tmp1
@@ -450,8 +455,167 @@ bmp280_compute_compensation:
     mov R5,#temp_real
     mov R6,#8
     call shr_32bit ;temp_real = (t_fine * 5 + 128) >> 8
+
+    ;============ Pressure compensation ============
+    ;Perform signed shift, flag already cleared
+    mov R5,#tmp4
+    mov R6,#1
+    call shr_32bit ;tmp4 = tmp4 >> 1
+    mov R0,#tmp1
+    call zero_32bit ;Clear tmp1
+    mov R0,#tmp1
+    inc R0
+    mov @R0,#$FA ;tmp1 = 0x0000FA00 = 64000
+    mov R0,#tmp4
+    mov R1,#tmp1
+    call sub_32bit ;tmp4 = tmp4 - tmp1 = t_fine>>1 - 64000
+    mov R0,#tmp1
+    mov R1,#tmp4
+    mov R6,#4
+    call copy_32bit ;tmp1 = tmp4, preserve tmp4 as it is needed later
+    ;Perform signed shift, flag already cleared
+    mov R5,#tmp1
+    mov R6,#2
+    call shr_32bit ;tmp1 = tmp4>>2
+    mov R0,#tmp2
+    mov R1,#tmp1
+    mov R6,#4
+    call copy_32bit ;tmp2 = tmp1 = tmp4>>2
+    mov R3,#tmp3
+    mov R4,#tmp1
+    mov R5,#tmp2
+    call mul_32bit ;tmp3 = tmp1*tmp2 = (tmp4>>2)*(tmp4>>2)
+    clr F0 ;Perform signed shift
+    mov R5,#tmp3
+    mov R6,#11
+    call shr_32bit ;tmp3 = (tmp4>>2)*(tmp4>>2) >> 11
+    ;Perform signed sign extension, flag already cleared
+    mov R0,#tmp1
+    mov R1,#cal_P6
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P6 (16-bit)
+    mov R3,#tmp2
+    mov R4,#tmp3
+    mov R5,#tmp1
+    call mul_32bit ;tmp2 = ((tmp4>>2)*(tmp4>>2) >> 11)*cal_P6
+    mov R0,#tmp1
+    mov R1,#tmp4
+    mov R6,#4
+    call copy_32bit ;tmp1 = tmp4, tmp4 is still needed later
+    clr F0 ;Perform signed sign extension, clear flag after mul_32bit has set it 
+    mov R0,#tmp3
+    mov R1,#cal_P5
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp3 (32-bit) = cal_P5 (16-bit)
+    mov R3,#tmp5
+    mov R4,#tmp1
+    mov R5,#tmp3
+    call mul_32bit ;tmp5 = tmp1*tmp3 = tmp4*cal_P5
+    mov R5,#tmp5
+    mov R6,#1
+    call shl_32bit ;tmp5 = (tmp4*cal_P5)<<1
+    mov R0,#tmp2
+    mov R1,#tmp5
+    call add_32bit ;tmp2 = tmp2 + (tmp4*cal_P5)<<1
+    clr F0 ;Perform signed sign extension, clear flag after mul_32bit has set it
+    mov R0,#tmp1
+    mov R1,#cal_P4
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P4 (16-bit)
+    mov R5,#tmp1
+    mov R6,#16
+    call shl_32bit ;tmp1 = cal_P4<<16
+    ;Perform signed shift, flag already cleared
+    mov R5,#tmp2
+    mov R6,#2
+    call shr_32bit ;tmp2 = tmp2>>2
+    mov R0,#tmp2
+    mov R1,#tmp1
+    call add_32bit ;tmp2 = tmp2>>2 + cal_P4<<16
+    ;Perform signed sign extension, flag already cleared
+    mov R0,#tmp1
+    mov R1,#cal_P2
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P2 (16-bit)
+    mov R0,#tmp3
+    mov R1,#tmp4
+    mov R6,#4
+    call copy_32bit ;tmp3 = tmp4, still needed...
+    mov R3,#tmp5
+    mov R4,#tmp1
+    mov R5,#tmp3
+    call mul_32bit ; tmp5 = tmp1*tmp3 = cal_P2*tmp4
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
+    mov R5,#tmp5
+    mov R6,#1
+    call shr_32bit
+    ;Perform signed shift, flag already cleared
+    mov R5,#tmp4
+    mov R6,#2
+    call shr_32bit ;tmp4 = tmp4>>2
+    mov R0,#tmp1
+    mov R1,#tmp4
+    mov R6,#4
+    call copy_32bit ;tmp1 = tmp4
+    mov R3,#tmp3
+    mov R4,#tmp1
+    mov R5,#tmp4
+    call mul_32bit ;tmp3 = tmp1*tmp4 = (tmp4>>2)*(tmp4>>2)
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
+    mov R5,#tmp3
+    mov R6,#13
+    call shr_32bit ;tmp3 = tmp3>>13 = (tmp4>>2)*(tmp4>>2)>>13
+    ;Perform signed sign extension, flag already cleared
+    mov R0,#tmp1
+    mov R1,#cal_P3
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P3 (16-bit)
+    mov R3,#tmp4
+    mov R4,#tmp1
+    mov R5,#tmp3
+    call mul_32bit ;tmp4 = tmp1*tmp3 = cal_P3*((tmp4>>2)*(tmp4>>2)>>13)
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
+    mov R5,#tmp4
+    mov R6,#3
+    call shr_32bit ;tmp4 = (cal_P3*((tmp4>>2)*(tmp4>>2)>>13))>>3
+    mov R0,#tmp4
+    mov R1,#tmp5
+    call add_32bit ;tmp4 = cal_P3*((tmp4>>2)*(tmp4>>2)>>13) + (cal_P2*tmp4)>>1
+    mov R5,#tmp4
+    mov R6,#18
+    call shr_32bit ;tmp4 = (cal_P3*((tmp4>>2)*(tmp4>>2)>>13) + (cal_P2*tmp4)>>1)>>18 (WTF Bosch, who the hell has come up with such equation...)
+
+    ;tmp2 = var2, tmp4 = var1
+    mov R0,#tmp1
+    call zero_32bit ;Clear tmp1
+    mov R0,#tmp1
+    inc R0
+    mov @R0,#$80 ;tmp1 = 0x00008000 = 32768
+
+    mov R0,#tmp1
+    mov R1,#tmp4
+    call add_32bit ;tmp1 = tmp4 + 32768
+
+    cpl F0 ;Perform unsigned sign extension, flag was cleared so set it this comment is not true DEBUG
+    mov R0,#tmp3
+    mov R1,#cal_P1
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp3 (32-bit) = cal_P1 (16-bit)
+
+    mov R3,#tmp4
+    mov R4,#tmp1
+    mov R5,#tmp3
+    call mul_32bit ;tmp4 = tmp1*tmp3 = tmp1*cal_P1
+
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
+    mov R5,#tmp4
+    mov R6,#15
+    call shr_32bit
+
     ret
 
+;TODO maybe delete some of the zero_32bit, because registers might be cleaned by mul_32bit already, check if some registers aren't loaded already with proper content
+;TODO maybe delete unsigned signed shifts and sign extensions
 load_cal_data:
     mov R0,#cal_T1
     mov @R0,#$70
