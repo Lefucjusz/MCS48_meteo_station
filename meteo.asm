@@ -276,15 +276,14 @@ mul_32bit_no_carry:
     djnz R2,mul_32bit_loop ;Repeat for every multiplier bit
     ret
 
-;R3 - pointer to remainder, R4 - pointer to divisor, R5 - pointer to dividend and result, uses BOTH flags and ALL registers, destroys F0,F1,R0,R1,R2,R6,R7
+;TODO commented code for signed division, as the BMP280 requires unsigned...
+;R3 - pointer to remainder, R4 - pointer to divisor, R5 - pointer to dividend and result, uses F1 and ALL registers, destroys F1,R0,R1,R2,R6,R7
 div_32bit:
-    call check_sign ;Check sign of operands, complement them if needed
+    ; call check_sign ;Check sign of operands, complement them if needed
     >movr R0,R3 ;Load pointer to remainder to R0
     call zero_32bit ;Clear remainder
     mov R2,#32 ;Set loop counter
     clr C ;Clear carry
-    clr F0
-    cpl F0 ;Set F0 - perform unsigned right shifts
 div_32bit_loop:
     mov R6,#1
     call shlc_32bit ;Shift dividend left with carry
@@ -308,9 +307,9 @@ div_32bit_continue:
     djnz R2,div_32bit_loop
     mov R6,#1
     call shlc_32bit ;Shift dividend one last time
-    jf1 div_32bit_end ;If there's no need to change sign of the result, finish
-    >movr R0,R5 ;Load pointer to result to R0
-    call neg_32bit ;Change sign of the result
+    ; jf1 div_32bit_end ;If there's no need to change sign of the result, finish
+    ; >movr R0,R5 ;Load pointer to result to R0
+    ; call neg_32bit ;Change sign of the result
 div_32bit_end:
     ret
 
@@ -602,7 +601,7 @@ bmp280_compute:
     mov R0,#tmp1
     mov R1,#tmp4
     call add_32bit ;tmp1 = tmp4 + 32768
-    cpl F0 ;Perform unsigned sign extension, flag was cleared so set it this comment is not true DEBUG
+    cpl F0 ;Perform unsigned sign extension, flag was cleared so set it
     mov R0,#tmp3
     mov R1,#cal_P1
     mov R6,#2
@@ -614,7 +613,7 @@ bmp280_compute:
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp4
     mov R6,#15
-    call shr_32bit
+    call shr_32bit ;tmp4 = (tmp1*cal_P1)>>15
     mov R0,#tmp1
     call zero_32bit ;Clear tmp1
     mov R0,#tmp1
@@ -656,17 +655,122 @@ bmp280_compute_not_zero:
     mov R4,#tmp1
     mov R5,#tmp2
     call mul_32bit ;tmp3 = ((1048576 - pres_read) - (tmp2>>12))*3125
+    mov R0,#tmp3 ;Load tmp3 pointer to R0
+    mov A,R0 ;Load R0 to A
+    add A,#3 ;Move pointer to MSB
+    mov R0,A ;Load A to R0
+    mov A,@R0 ;Load MSB to A
+    jb7 bmp280_compute_msb_set ;If MSB set
+    mov R5,#tmp3 ;If MSB not set
+    mov R6,#1
+    call shl_32bit ;tmp3 = tmp3<<1
+    mov R3,#tmp1
+    mov R4,#tmp4
+    mov R5,#tmp3
+    call div_32bit ;tmp3 = tmp3/tmp4
+    jmp bmp280_compute_continue
+bmp280_compute_msb_set:
+    mov R3,#tmp1
+    mov R4,#tmp4
+    mov R5,#tmp3
+    call div_32bit ;tmp3 = tmp3/tmp4
+    mov R5,#tmp3
+    mov R6,#1
+    call shl_32bit ;tmp3 = tmp3<<1
+bmp280_compute_continue:
+    mov R0,#tmp1
+    mov R1,#tmp3
+    mov R6,#4
+    call copy_32bit ;tmp1 = tmp3, preserve tmp3 as it is needed later
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
+    mov R5,#tmp1
+    mov R6,#3
+    call shr_32bit ;tmp1 = tmp1>>3 = tmp3>>3
+    mov R0,#tmp2
+    mov R1,#tmp1
+    mov R6,#4
+    call copy_32bit ;tmp2 = tmp1 = tmp3>>3
+    mov R3,#tmp4
+    mov R4,#tmp1
+    mov R5,#tmp2
+    call mul_32bit ;tmp4 = tmp1*tmp2 = (tmp3>>3)*(tmp3>>3)
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
+    mov R5,#tmp4
+    mov R6,#13
+    call shr_32bit ;tmp4 = ((tmp3>>3)*(tmp3>>3))>>13
+    ;Perform signed sign extension, flag already cleared
+    mov R0,#tmp1
+    mov R1,#cal_P9
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P9 (16-bit)
+    mov R3,#tmp2
+    mov R4,#tmp1
+    mov R5,#tmp4
+    call mul_32bit ;tmp2 = cal_P9*(((tmp3>>3)*(tmp3>>3))>>13)
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
+    mov R5,#tmp2
+    mov R6,#12
+    call shr_32bit ;tmp2 = (cal_P9*(((tmp3>>3)*(tmp3>>3))>>13))>>12, again great equation!
 
-    
+    mov R0,#tmp1
+    mov R1,#tmp3
+    mov R6,#4
+    call copy_32bit ;tmp1 = tmp3, preserve tmp3 as it is needed later
 
+    ;Perform signed shift, flag already cleared
+    mov R5,#tmp1
+    mov R6,#2
+    call shr_32bit ;tmp1 = tmp1>>2 = tmp3>>2
 
+    ;Perform signed sign extension, flag already cleared
+    mov R0,#tmp4
+    mov R1,#cal_P8
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P8 (16-bit)
 
-    ;Do not corrupt tmp4 = var1
-bmp280_compute_end:
+    mov R3,#tmp5
+    mov R4,#tmp1
+    mov R5,#tmp4
+    call mul_32bit ;tmp5 = tmp1*tmp4 = (tmp3>>2)*cal_P8
+
+    clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
+    mov R5,#tmp5
+    mov R6,#13
+    call shr_32bit ;tmp5 = ((tmp3>>2)*cal_P8)>>13
+
+    ;Preserve tmp2 = var1, tmp5 = var2, tmp3 = p
+
+    mov R0,#tmp2
+    mov R1,#tmp5
+    call add_32bit ;tmp2 = tmp2 + tmp5
+
+    ;Perform signed sign extension, flag already cleared
+    mov R0,#tmp1
+    mov R1,#cal_P7
+    mov R6,#2
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P7 (16-bit)
+
+    mov R0,#tmp2
+    mov R1,#tmp1
+    call add_32bit ;tmp2 = tmp2 + cal_P7
+
+    ;Perform signed shift, flag already cleared
+    mov R5,#tmp2
+    mov R6,#4
+    call shr_32bit ;tmp2 = tmp2>>4
+
+    mov R0,#tmp3
+    mov R1,#tmp2
+    call add_32bit ; tmp3 = tmp3 + tmp2
+
     ret
 
 ;TODO maybe delete some of the zero_32bit, because registers might be cleaned by mul_32bit already, check if some registers aren't loaded already with proper content
 ;TODO maybe delete unsigned signed shifts and sign extensions
+;TODO add MSB set routine? It is needed in multiple places in code
+;TODO simplify MSB checking if possible (no cpl A)
+;TODO delete signed division, not needed
+;TODO tmp3 change to pres_real
 load_cal_data:
     mov R0,#cal_T1
     mov @R0,#$70
