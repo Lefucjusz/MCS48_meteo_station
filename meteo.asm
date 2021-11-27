@@ -101,6 +101,68 @@ loop:
 
 ;Subroutines
 
+load_cal_data:
+    mov R0,#cal_T1
+    mov @R0,#$70
+    inc R0
+    mov @R0,#$6B
+
+    mov R0,#cal_T2
+    mov @R0,#$43
+    inc R0
+    mov @R0,#$67
+
+    mov R0,#cal_T3
+    mov @R0,#$18
+    inc R0
+    mov @R0,#$FC
+
+    mov R0,#cal_P1
+    mov @R0,#$7D
+    inc R0
+    mov @R0,#$8E
+
+    mov R0,#cal_P2
+    mov @R0,#$43
+    inc R0
+    mov @R0,#$D6
+
+    mov R0,#cal_P3
+    mov @R0,#$D0
+    inc R0
+    mov @R0,#$0B
+
+    mov R0,#cal_P4
+    mov @R0,#$27
+    inc R0
+    mov @R0,#$0B
+
+    mov R0,#cal_P5
+    mov @R0,#$8C
+    inc R0
+    mov @R0,#$00
+
+    mov R0,#cal_P6
+    mov @R0,#$F9
+    inc R0
+    mov @R0,#$FF
+
+    mov R0,#cal_P7
+    mov @R0,#$8C
+    inc R0
+    mov @R0,#$3C
+
+    mov R0,#cal_P8
+    mov @R0,#$F8
+    inc R0
+    mov @R0,#$C6
+
+    mov R0,#cal_P9
+    mov @R0,#$70
+    inc R0
+    mov @R0,#$17
+    ret
+
 ;R0 - pointer to value to be zeroed, uses and destroys R0,R7
 zero_32bit:
     clr A ;Clear A
@@ -122,7 +184,7 @@ fill_32bit_loop:
     djnz R7,fill_32bit_loop ;Repeat for every byte
     ret
 
-;F0 - signedness, if set, unsigned, R0 - pointer to destination, R1 - pointer to source, R6 - number of bytes to copy, uses F0,R0,R1,R5,R6,R7, destroys R0,R1,R5,R6,R7
+;F0 - signedness, if set, unsigned, R0 - pointer to destination, R1 - pointer to source, R6 - number of bytes to copy, uses F0,R0,R1,R5,R6,R7, destroys R0,R1,R4,R5,R6,R7
 copy_32bit:
     >movr R5,R0 ;Preserve R0 in R5
     >movr R4,R1 ;Preserve R1 in R4
@@ -319,7 +381,7 @@ bmp280_compute:
     mov R1,#tmp2
     call sub_32bit ;tmp1 = temp_read>>4 - cal_T1
     mov R0,#tmp2
-    mov R1,#tmp1
+    mov R1,#tmp1 
     mov R6,#4
     call copy_32bit ;Copy 4 bytes, tmp2 = tmp1 = temp_read>>4 - cal_T1
     mov R3,#tmp4
@@ -350,16 +412,16 @@ bmp280_compute:
     mov R1,#tmp3
     mov R6,#4
     call copy_32bit ;tmp4 = tmp3, this value is needed during pressure compensation (t_fine, see BMP280 datasheet) so preserve it
-    mov R0,#tmp1
-    call zero_32bit
+    ; mov R0,#tmp1
+    ; call zero_32bit ;last time tmp1 was used as argument to mul_32bit, so it's already zeroed
     mov R0,#tmp1
     mov @R0,#5 ;tmp1 = 5
     mov R3,#temp_real
     mov R4,#tmp3
     mov R5,#tmp1
     call mul_32bit ;temp_real = t_fine * 5
-    mov R0,#tmp1
-    call zero_32bit
+    ; mov R0,#tmp1
+    ; call zero_32bit ;last time tmp1 was used as argument to mul_32bit, so it's already zeroed
     mov R0,#tmp1
     mov @R0,#128 ;tmp1 = 128
     mov R0,#temp_real
@@ -375,131 +437,163 @@ bmp280_compute:
     mov R5,#tmp4
     mov R6,#1
     call shr_32bit ;tmp4 = tmp4 >> 1
+
     mov R0,#tmp1
     call zero_32bit ;Clear tmp1
+
     mov R0,#tmp1
     inc R0
     mov @R0,#$FA ;tmp1 = 0x0000FA00 = 64000
+
     mov R0,#tmp4
     mov R1,#tmp1
     call sub_32bit ;tmp4 = tmp4 - tmp1 = t_fine>>1 - 64000
+
     mov R0,#tmp1
     mov R1,#tmp4
     mov R6,#4
     call copy_32bit ;tmp1 = tmp4, preserve tmp4 as it is needed later
+
     ;Perform signed shift, flag already cleared
     mov R5,#tmp1
     mov R6,#2
     call shr_32bit ;tmp1 = tmp4>>2
+
     mov R0,#tmp2
     mov R1,#tmp1
     mov R6,#4
     call copy_32bit ;tmp2 = tmp1 = tmp4>>2
+
     mov R3,#tmp3
     mov R4,#tmp1
     mov R5,#tmp2
     call mul_32bit ;tmp3 = tmp1*tmp2 = (tmp4>>2)*(tmp4>>2)
+
     clr F0 ;Perform signed shift
     mov R5,#tmp3
     mov R6,#11
     call shr_32bit ;tmp3 = (tmp4>>2)*(tmp4>>2) >> 11
+
     ;Perform signed sign extension, flag already cleared
     mov R0,#tmp1
     mov R1,#cal_P6
     mov R6,#2
     call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P6 (16-bit)
+
     mov R3,#tmp2
     mov R4,#tmp3
     mov R5,#tmp1
     call mul_32bit ;tmp2 = ((tmp4>>2)*(tmp4>>2) >> 11)*cal_P6
+
     mov R0,#tmp1
     mov R1,#tmp4
     mov R6,#4
     call copy_32bit ;tmp1 = tmp4, tmp4 is still needed later
+
     clr F0 ;Perform signed sign extension, clear flag after mul_32bit has set it 
     mov R0,#tmp3
     mov R1,#cal_P5
     mov R6,#2
     call copy_32bit ;Copy 2 bytes - tmp3 (32-bit) = cal_P5 (16-bit)
+
     mov R3,#tmp5
     mov R4,#tmp1
     mov R5,#tmp3
     call mul_32bit ;tmp5 = tmp1*tmp3 = tmp4*cal_P5
+
     mov R5,#tmp5
     mov R6,#1
     call shl_32bit ;tmp5 = (tmp4*cal_P5)<<1
+
     mov R0,#tmp2
     mov R1,#tmp5
     call add_32bit ;tmp2 = tmp2 + (tmp4*cal_P5)<<1
+
     clr F0 ;Perform signed sign extension, clear flag after mul_32bit has set it
     mov R0,#tmp1
     mov R1,#cal_P4
     mov R6,#2
     call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P4 (16-bit)
+
     mov R5,#tmp1
     mov R6,#16
     call shl_32bit ;tmp1 = cal_P4<<16
+
     ;Perform signed shift, flag already cleared
     mov R5,#tmp2
     mov R6,#2
     call shr_32bit ;tmp2 = tmp2>>2
+
     mov R0,#tmp2
     mov R1,#tmp1
     call add_32bit ;tmp2 = tmp2>>2 + cal_P4<<16
+
     ;Perform signed sign extension, flag already cleared
     mov R0,#tmp1
     mov R1,#cal_P2
     mov R6,#2
     call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P2 (16-bit)
+
     mov R0,#tmp3
     mov R1,#tmp4
     mov R6,#4
     call copy_32bit ;tmp3 = tmp4, still needed...
-    mov R3,#tmp5
+
+    ; mov R3,#tmp5 ;Optimization - already loaded with tmp5
     mov R4,#tmp1
     mov R5,#tmp3
     call mul_32bit ; tmp5 = tmp1*tmp3 = cal_P2*tmp4
+
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp5
     mov R6,#1
     call shr_32bit
+
     ;Perform signed shift, flag already cleared
     mov R5,#tmp4
     mov R6,#2
     call shr_32bit ;tmp4 = tmp4>>2
+
     mov R0,#tmp1
     mov R1,#tmp4
     mov R6,#4
     call copy_32bit ;tmp1 = tmp4
+
     mov R3,#tmp3
     mov R4,#tmp1
     mov R5,#tmp4
     call mul_32bit ;tmp3 = tmp1*tmp4 = (tmp4>>2)*(tmp4>>2)
+
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp3
     mov R6,#13
     call shr_32bit ;tmp3 = tmp3>>13 = (tmp4>>2)*(tmp4>>2)>>13
+
     ;Perform signed sign extension, flag already cleared
     mov R0,#tmp1
     mov R1,#cal_P3
     mov R6,#2
     call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P3 (16-bit)
+
     mov R3,#tmp4
     mov R4,#tmp1
     mov R5,#tmp3
     call mul_32bit ;tmp4 = tmp1*tmp3 = cal_P3*((tmp4>>2)*(tmp4>>2)>>13)
+
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp4
     mov R6,#3
     call shr_32bit ;tmp4 = (cal_P3*((tmp4>>2)*(tmp4>>2)>>13))>>3
+
     mov R0,#tmp4
     mov R1,#tmp5
     call add_32bit ;tmp4 = cal_P3*((tmp4>>2)*(tmp4>>2)>>13) + (cal_P2*tmp4)>>1
-    mov R5,#tmp4
+
+    ;mov R5,#tmp4 ;Optimization - already loaded with tmp4
     mov R6,#18
     call shr_32bit ;tmp4 = (cal_P3*((tmp4>>2)*(tmp4>>2)>>13) + (cal_P2*tmp4)>>1)>>18 (WTF Bosch, who the hell has come up with such equation...)
-    mov R0,#tmp1
-    call zero_32bit ;Clear tmp1
+    ; mov R0,#tmp1
+    ; call zero_32bit ;Clear tmp1 ;last time tmp1 was used as argument to mul_32bit, so it's already zeroed
     mov R0,#tmp1
     inc R0
     mov @R0,#$80 ;tmp1 = 0x00008000 = 32768
@@ -511,7 +605,7 @@ bmp280_compute:
     mov R1,#cal_P1
     mov R6,#2
     call copy_32bit ;Copy 2 bytes - tmp3 (32-bit) = cal_P1 (16-bit)
-    mov R3,#tmp4
+    ; mov R3,#tmp4 ;Optimization - already loaded with tmp4
     mov R4,#tmp1
     mov R5,#tmp3
     call mul_32bit ;tmp4 = tmp1*tmp3 = tmp1*cal_P1
@@ -519,8 +613,8 @@ bmp280_compute:
     mov R5,#tmp4
     mov R6,#15
     call shr_32bit ;tmp4 = (tmp1*cal_P1)>>15
-    mov R0,#tmp1
-    call zero_32bit ;Clear tmp1
+    ; mov R0,#tmp1
+    ; call zero_32bit ;Clear tmp1 ;last time tmp1 was used as argument to mul_32bit, so it's already zeroed
     mov R0,#tmp1
     mov @R0,#1 ;tmp1 = 1
     mov R0,#tmp4
@@ -557,8 +651,8 @@ bmp280_compute_not_zero:
     inc R0
     mov @R0,#$0C ;tmp2 = 0x00000C35 = 3125
     mov R3,#tmp3
-    mov R4,#tmp1
-    mov R5,#tmp2
+    ;mov R4,#tmp1 ;Optimization - already loaded with tmp1
+    ;mov R5,#tmp2 ;Optimization - already loaded with tmp2
     call mul_32bit ;tmp3 = ((1048576 - pres_read) - (tmp2>>12))*3125
     mov R0,#tmp3 ;Load tmp3 pointer to R0
     mov A,R0 ;Load R0 to A
@@ -571,15 +665,15 @@ bmp280_compute_not_zero:
     call shl_32bit ;tmp3 = tmp3<<1
     mov R3,#tmp1
     mov R4,#tmp4
-    mov R5,#tmp3
+    ; mov R5,#tmp3 ;Optimization - already loaded with tmp3
     call div_32bit ;tmp3 = tmp3/tmp4
     jmp bmp280_compute_continue
 bmp280_compute_msb_set:
-    mov R3,#tmp1
-    mov R4,#tmp4
-    mov R5,#tmp3
+    ; mov R3,#tmp1 ;Optimization - already loaded with tmp3
+    ; mov R4,#tmp4 ;Optimization - already loaded with tmp4
+    ; mov R5,#tmp3 ;Optimization - already loaded with tmp3
     call div_32bit ;tmp3 = tmp3/tmp4
-    mov R5,#tmp3
+    ; mov R5,#tmp3 ;Optimization - already loaded with tmp3
     mov R6,#1
     call shl_32bit ;tmp3 = tmp3<<1
 bmp280_compute_continue:
@@ -670,71 +764,9 @@ bmp280_compute_continue:
 
     ret
 
-;TODO maybe delete some of the zero_32bit, because registers might be cleaned by mul_32bit already, check if some registers aren't loaded already with proper content
+;TODO check if some registers aren't loaded already with proper content
 ;TODO tmp3 change to pres_real
-load_cal_data:
-    mov R0,#cal_T1
-    mov @R0,#$70
-    inc R0
-    mov @R0,#$6B
-
-    mov R0,#cal_T2
-    mov @R0,#$43
-    inc R0
-    mov @R0,#$67
-
-    mov R0,#cal_T3
-    mov @R0,#$18
-    inc R0
-    mov @R0,#$FC
-
-    mov R0,#cal_P1
-    mov @R0,#$7D
-    inc R0
-    mov @R0,#$8E
-
-    mov R0,#cal_P2
-    mov @R0,#$43
-    inc R0
-    mov @R0,#$D6
-
-    mov R0,#cal_P3
-    mov @R0,#$D0
-    inc R0
-    mov @R0,#$0B
-
-    mov R0,#cal_P4
-    mov @R0,#$27
-    inc R0
-    mov @R0,#$0B
-
-    mov R0,#cal_P5
-    mov @R0,#$8C
-    inc R0
-    mov @R0,#$00
-
-    mov R0,#cal_P6
-    mov @R0,#$F9
-    inc R0
-    mov @R0,#$FF
-
-    mov R0,#cal_P7
-    mov @R0,#$8C
-    inc R0
-    mov @R0,#$3C
-
-    mov R0,#cal_P8
-    mov @R0,#$F8
-    inc R0
-    mov @R0,#$C6
-
-    mov R0,#cal_P9
-    mov @R0,#$70
-    inc R0
-    mov @R0,#$17
-    ret
-
-    
+        
 ;R0	- byte to send, uses R0,R6,R7
 uart_write_byte:
 	mov R6,#8 ;Load bit counter	
@@ -755,7 +787,7 @@ uart_write_delay:
 	orl P2,#tx ;Set tx pin high - stop bit
 	call delay_100us
 	ret
-           
+              
 ;~100uS delay, uses R7
 delay_100us:
 	mov R7,#28
