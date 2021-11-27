@@ -101,27 +101,6 @@ loop:
 
 ;Subroutines
 
-;R0	- byte to send, uses R0,R6,R7
-uart_write_byte:
-	mov R6,#8 ;Load bit counter	
-	mov A,R0 ;Move byte to be send to A	
-	anl P2,#~tx ;Set tx pin low - start bit
-	call delay_100us
-uart_write_loop:
-	jb0 uart_write_one ;Check if LSB of A is set
-	anl P2,#~tx ;Set tx pin low
-	jmp uart_write_delay	
-uart_write_one:
-	orl P2,#tx ;Set tx pin high
-uart_write_delay:
-	call delay_100us
-	rr A ;Shift byte one bit right
-	djnz R6,uart_write_loop
-
-	orl P2,#tx ;Set tx pin high - stop bit
-	call delay_100us
-	ret
-
 ;R0 - pointer to value to be zeroed, uses and destroys R0,R7
 zero_32bit:
     clr A ;Clear A
@@ -154,8 +133,8 @@ copy_32bit:
     mov R1,A ;Store value back in register
     mov A,@R1 ;Load MSB to A
     cpl A ;Complement A
-    jb7 copy_32bit_unsigned ;If sign bit not set, value is positive, sign extension as for unsigned
-    call fill_32bit ;Perform sign extension for signed value
+    jb7 copy_32bit_unsigned ;If sign bit not set, value is positive
+    call fill_32bit ;Otherwise perform sign extension for signed value
     jmp copy_32bit_continue ;Continue with algorithm
 copy_32bit_unsigned:
     call zero_32bit ;Perform sign extension for unsigned value
@@ -235,25 +214,6 @@ sub_32bit_loop:
     djnz R7,sub_32bit_loop
     ret
 
-;R0 - pointer to value to change sign of, uses and destroys R0,R1,R7
-neg_32bit:
-    mov R7,#4 ;Load loop counter
-    >movr R1,R0 ;Preserve pointer to value in R1 - it will be used again later
-neg_32bit_loop:
-    mov A,@R0 ;Load byte to A
-    cpl A ;Complement A
-    mov @R0,A ;Store value back in RAM
-    inc R0
-    djnz R7,neg_32bit_loop ;Repeat for every byte
-    mov R0,#tmp_neg
-    call zero_32bit ;Clear tmp_neg variable
-    mov R0,#tmp_neg
-    mov @R0,#1 ;tmp_neg = 1
-    >movr R0,R1 ;Load pointer to value back to R0
-    mov R1,#tmp_neg
-    call add_32bit ;Add 1 to result to finish two's complement
-    ret
-
 ;R3 - pointer to result, R4 - pointer to multiplicand, R5 - pointer to multiplier, uses F0 and ALL registers, destroys F0,R0,R1,R2,R6,R7
 mul_32bit:
     >movr R0,R3 ;Load R3 to R0
@@ -276,10 +236,8 @@ mul_32bit_no_carry:
     djnz R2,mul_32bit_loop ;Repeat for every multiplier bit
     ret
 
-;TODO commented code for signed division, as the BMP280 requires unsigned...
 ;R3 - pointer to remainder, R4 - pointer to divisor, R5 - pointer to dividend and result, uses F1 and ALL registers, destroys F1,R0,R1,R2,R6,R7
 div_32bit:
-    ; call check_sign ;Check sign of operands, complement them if needed
     >movr R0,R3 ;Load pointer to remainder to R0
     call zero_32bit ;Clear remainder
     mov R2,#32 ;Set loop counter
@@ -307,61 +265,8 @@ div_32bit_continue:
     djnz R2,div_32bit_loop
     mov R6,#1
     call shlc_32bit ;Shift dividend one last time
-    ; jf1 div_32bit_end ;If there's no need to change sign of the result, finish
-    ; >movr R0,R5 ;Load pointer to result to R0
-    ; call neg_32bit ;Change sign of the result
 div_32bit_end:
     ret
-
-;R4 - pointer to first value, R5 - pointer to second value, F1 - sign flag, if cleared, result sign has to be changed, uses F1,R0,R1,R4,R5,R7, destroys F1,R0,R1,R7
-check_sign:
-    clr F1
-    cpl F1 ;Set sign flag
-    mov A,R4 ;Load pointer to first value to A
-    add A,#3 ;Move pointer to MSB
-    mov R0,A ;Load pointer to MSB to R0
-    mov A,@R0 ;Load MSB to A
-    cpl A ;Complement A
-    jb7 check_sign_first_pos ;If sign bit is not set, proceed to check second value
-    >movr R0,R4 ;Load pointer to first value to R0
-    call neg_32bit ;Change sign of value
-    cpl F1 ;Complement sign flag
-check_sign_first_pos:
-    mov A,R5 ;Load pointer to second value to A
-    add A,#3 ;Move pointer to MSB
-    mov R0,A ;Load pointer to MSB to R0
-    mov A,@R0 ;Load MSB to A
-    cpl A ;Complement A
-    jb7 check_sign_done ;If sign bit is not set, finish
-    >movr R0,R5 ;Load pointer to second value to R0
-    call neg_32bit ;Change sign of value
-    cpl F1 ;Complement sign flag
-check_sign_done:
-    ret
-
-        
-;~100uS delay, uses R7
-delay_100us:
-	mov R7,#28
-delay_100us_loop:
-	djnz R7,delay_500us_loop
-	ret
-
-;~500uS delay, uses R7
-delay_500us:
-	mov R7,#164
-delay_500us_loop:
-	djnz R7,delay_500us_loop
-	ret
-
-;R6 - delay time in msec, uses R6,R7
-delay_ms:
-	mov R7,#228
-delay_ms_loop:
-	nop
-	djnz R7,delay_ms_loop
-	djnz R6,delay_ms
-	ret
 
 bmp280_compute:
     ;============ Temperature compensation ============
@@ -766,10 +671,6 @@ bmp280_compute_continue:
     ret
 
 ;TODO maybe delete some of the zero_32bit, because registers might be cleaned by mul_32bit already, check if some registers aren't loaded already with proper content
-;TODO maybe delete unsigned signed shifts and sign extensions
-;TODO add MSB set routine? It is needed in multiple places in code
-;TODO simplify MSB checking if possible (no cpl A)
-;TODO delete signed division, not needed
 ;TODO tmp3 change to pres_real
 load_cal_data:
     mov R0,#cal_T1
@@ -832,3 +733,48 @@ load_cal_data:
     inc R0
     mov @R0,#$17
     ret
+
+    
+;R0	- byte to send, uses R0,R6,R7
+uart_write_byte:
+	mov R6,#8 ;Load bit counter	
+	mov A,R0 ;Move byte to be send to A	
+	anl P2,#~tx ;Set tx pin low - start bit
+	call delay_100us
+uart_write_loop:
+	jb0 uart_write_one ;Check if LSB of A is set
+	anl P2,#~tx ;Set tx pin low
+	jmp uart_write_delay	
+uart_write_one:
+	orl P2,#tx ;Set tx pin high
+uart_write_delay:
+	call delay_100us
+	rr A ;Shift byte one bit right
+	djnz R6,uart_write_loop
+
+	orl P2,#tx ;Set tx pin high - stop bit
+	call delay_100us
+	ret
+           
+;~100uS delay, uses R7
+delay_100us:
+	mov R7,#28
+delay_100us_loop:
+	djnz R7,delay_500us_loop
+	ret
+
+;~500uS delay, uses R7
+delay_500us:
+	mov R7,#164
+delay_500us_loop:
+	djnz R7,delay_500us_loop
+	ret
+
+;R6 - delay time in msec, uses R6,R7
+delay_ms:
+	mov R7,#228
+delay_ms_loop:
+	nop
+	djnz R7,delay_ms_loop
+	djnz R6,delay_ms
+	ret
