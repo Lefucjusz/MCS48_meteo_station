@@ -1,38 +1,47 @@
 ;MAB8049H, 10.000MHz
 ;Gdansk 2021
+;TODO add uses/destroys
 	.cr	8048
 	.tf	rom.bin,BIN
 	.lf	meteo.lst
 ;==================Defines=====================
 ;Pins
 tx  .eq %10000000 ;Tx pin at P2.7
+sda .eq %01000000 ;SDA pin at P2.6
+scl .eq %00100000 ;SCL pin at P2.5
+
+;BMP280 addresses
+bmp280_wr_addr  .eq %11101100 ;0x76 << 1 | 0
+bmp280_rd_addr  .eq %11101101 ;0x76 << 1 | 1
+
+bmp280_cal_regs_size    .eq 24 ;12 registers 2 bytes each = 24 bytes
+bmp280_dig_T1_LSB       .eq $88 ;First calibration register address
+bmp280_pres_MSB         .eq $F7 ;First raw measurement register address
 
 ;RAM variables, little endian
-tmp_neg .eq $20 ;32-bit
+dig_T1  .eq $20 ;16-bit
+dig_T2  .eq $22 ;16-bit
+dig_T3  .eq $24 ;16-bit
+dig_P1  .eq $26 ;16-bit
+dig_P2  .eq $28 ;16-bit
+dig_P3  .eq $2A ;16-bit
+dig_P4  .eq $2C ;16-bit
+dig_P5  .eq $2E ;16-bit
+dig_P6  .eq $30 ;16-bit
+dig_P7  .eq $32 ;16-bit
+dig_P8  .eq $34 ;16-bit
+dig_P9  .eq $36 ;16-bit
 
-cal_T1  .eq $24 ;16-bit
-cal_T2  .eq $26 ;16-bit
-cal_T3  .eq $28 ;16-bit
-cal_P1  .eq $2A ;16-bit
-cal_P2  .eq $2C ;16-bit
-cal_P3  .eq $2E ;16-bit
-cal_P4  .eq $30 ;16-bit
-cal_P5  .eq $32 ;16-bit
-cal_P6  .eq $34 ;16-bit
-cal_P7  .eq $36 ;16-bit
-cal_P8  .eq $38 ;16-bit
-cal_P9  .eq $3A ;16-bit
+temp_raw    .eq $38 ;32-bit
+temp_real   .eq $3C ;32-bit
+pres_raw    .eq $40 ;32-bit
+pres_real   .eq $44 ;32-bit
 
-temp_read   .eq $3C ;32-bit
-temp_real   .eq $40 ;32-bit
-pres_read   .eq $44 ;32-bit
-pres_real   .eq $48 ;32-bit
-
-tmp1    .eq $4C ;32-bit
-tmp2    .eq $50 ;32-bit
-tmp3    .eq $54 ;32-bit
-tmp4    .eq $58 ;32-bit
-tmp5    .eq $5C ;32-bit
+tmp1    .eq $48 ;32-bit
+tmp2    .eq $4C ;32-bit
+tmp3    .eq $50 ;32-bit
+tmp4    .eq $54 ;32-bit
+tmp5    .eq $58 ;32-bit
 
 ;Macros
 swap    .ma Rx,Ry ;Swaps two registers
@@ -51,117 +60,22 @@ movr    .ma Rx,Ry ;Moves Ry to Rx (Rx = Ry)
 	jmp main
 
 main:
-    mov R0,#temp_read
-    mov @R0,#$D0
-    inc R0
-    mov @R0,#$EE
-    inc R0
-    mov @R0,#$07
-    inc R0
-    mov @R0,#$00
-
-    mov R0,#pres_read
-    mov @R0,#$AC
-    inc R0
-    mov @R0,#$55
-    inc R0
-    mov @R0,#$06
-    inc R0
-    mov @R0,#$00
-
-    call load_cal_data
+    call bmp280_configure
+    call bmp280_get_cal_regs
+    call bmp280_get_raw_meas
     call bmp280_compute
 
-    mov A,#tmp3
-    add A,#3
-    mov R1,A
-    mov A,@R1
-    mov R0,A
-    call uart_write_byte
+    mov R1,#temp_real
+    call uart_write_32bit
 
-    dec R1
-    mov A,@R1
-    mov R0,A
-    call uart_write_byte
-
-    dec R1
-    mov A,@R1
-    mov R0,A
-    call uart_write_byte
-
-    dec R1
-    mov A,@R1
-    mov R0,A
-    call uart_write_byte
-
+    mov R1,#pres_real
+    call uart_write_32bit
 loop:
 	jmp loop
 
 ;Constants
 
 ;Subroutines
-
-load_cal_data:
-    mov R0,#cal_T1
-    mov @R0,#$70
-    inc R0
-    mov @R0,#$6B
-
-    mov R0,#cal_T2
-    mov @R0,#$43
-    inc R0
-    mov @R0,#$67
-
-    mov R0,#cal_T3
-    mov @R0,#$18
-    inc R0
-    mov @R0,#$FC
-
-    mov R0,#cal_P1
-    mov @R0,#$7D
-    inc R0
-    mov @R0,#$8E
-
-    mov R0,#cal_P2
-    mov @R0,#$43
-    inc R0
-    mov @R0,#$D6
-
-    mov R0,#cal_P3
-    mov @R0,#$D0
-    inc R0
-    mov @R0,#$0B
-
-    mov R0,#cal_P4
-    mov @R0,#$27
-    inc R0
-    mov @R0,#$0B
-
-    mov R0,#cal_P5
-    mov @R0,#$8C
-    inc R0
-    mov @R0,#$00
-
-    mov R0,#cal_P6
-    mov @R0,#$F9
-    inc R0
-    mov @R0,#$FF
-
-    mov R0,#cal_P7
-    mov @R0,#$8C
-    inc R0
-    mov @R0,#$3C
-
-    mov R0,#cal_P8
-    mov @R0,#$F8
-    inc R0
-    mov @R0,#$C6
-
-    mov R0,#cal_P9
-    mov @R0,#$70
-    inc R0
-    mov @R0,#$17
-    ret
 
 ;R0 - pointer to value to be zeroed, uses and destroys R0,R7
 zero_32bit:
@@ -333,78 +247,78 @@ div_32bit_end:
 bmp280_compute:
     ;============ Temperature compensation ============
     mov R0,#tmp1
-    mov R1,#temp_read
+    mov R1,#temp_raw
     mov R6,#4
-    call copy_32bit ;Copy 4 bytes, tmp1 = temp_read
+    call copy_32bit ;Copy 4 bytes, tmp1 = temp_raw
     clr F0 ;Perform signed shift
     mov R5,#tmp1
     mov R6,#3
-    call shr_32bit ;tmp1 = temp_read>>3
+    call shr_32bit ;tmp1 = temp_raw>>3
     cpl F0 ;Perform unsigned sign extension
     mov R0,#tmp2
-    mov R1,#cal_T1
+    mov R1,#dig_T1
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
+    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = dig_T1 (16-bit)    
     mov R5,#tmp2
     mov R6,#1
-    call shl_32bit ;tmp2 = cal_T1<<1
+    call shl_32bit ;tmp2 = dig_T1<<1
     mov R0,#tmp1
     mov R1,#tmp2
-    call sub_32bit ;tmp1 = temp_read>>3 - cal_T1<<1
+    call sub_32bit ;tmp1 = temp_raw>>3 - dig_T1<<1
     clr F0 ;Perform signed sign extension
     mov R0,#tmp2
-    mov R1,#cal_T2
+    mov R1,#dig_T2
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes, tmp2 = cal_T2
+    call copy_32bit ;Copy 2 bytes, tmp2 = dig_T2
     mov R3,#tmp3
     mov R4,#tmp1
     mov R5,#tmp2
-    call mul_32bit ;tmp3 = (temp_read>>3 - cal_T1<<1) * cal_T2
+    call mul_32bit ;tmp3 = (temp_raw>>3 - dig_T1<<1) * dig_T2
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp3
     mov R6,#11
-    call shr_32bit ;tmp3 = ((temp_read>>3 - cal_T1<<1) * cal_T2) >> 11
+    call shr_32bit ;tmp3 = ((temp_raw>>3 - dig_T1<<1) * dig_T2) >> 11
     mov R0,#tmp1
-    mov R1,#temp_read
+    mov R1,#temp_raw
     mov R6,#4
-    call copy_32bit ;Copy 4 bytes, tmp1 = temp_read
+    call copy_32bit ;Copy 4 bytes, tmp1 = temp_raw
     ;Perform signed shift, flag already cleared
     mov R5,#tmp1
     mov R6,#4
-    call shr_32bit ;tmp1 = temp_read>>4
+    call shr_32bit ;tmp1 = temp_raw>>4
     cpl F0 ;Perform unsigned sign extension
     mov R0,#tmp2
-    mov R1,#cal_T1
+    mov R1,#dig_T1
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = cal_T1 (16-bit)
+    call copy_32bit ;Copy 2 bytes - tmp2 (32-bit) = dig_T1 (16-bit)
     mov R0,#tmp1
     mov R1,#tmp2
-    call sub_32bit ;tmp1 = temp_read>>4 - cal_T1
+    call sub_32bit ;tmp1 = temp_raw>>4 - dig_T1
     mov R0,#tmp2
     mov R1,#tmp1 
     mov R6,#4
-    call copy_32bit ;Copy 4 bytes, tmp2 = tmp1 = temp_read>>4 - cal_T1
+    call copy_32bit ;Copy 4 bytes, tmp2 = tmp1 = temp_raw>>4 - dig_T1
     mov R3,#tmp4
     mov R4,#tmp1
     mov R5,#tmp2
-    call mul_32bit ;tmp4 = (temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)
+    call mul_32bit ;tmp4 = (temp_raw>>4 - dig_T1) * (temp_raw>>4 - dig_T1)
     clr F0 ;Perform signed shift
     mov R5,#tmp4
     mov R6,#12
-    call shr_32bit ;tmp4 = ((temp_read>>4 - cal_T1) * (temp_read>>4 - cal_T1)) >> 12
+    call shr_32bit ;tmp4 = ((temp_raw>>4 - dig_T1) * (temp_raw>>4 - dig_T1)) >> 12
     ;Perform signed sign extension, flag already cleared
     mov R0,#tmp1
-    mov R1,#cal_T3
+    mov R1,#dig_T3
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_T3 (16-bit)
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = dig_T3 (16-bit)
     mov R3,#tmp2
     mov R4,#tmp4
     mov R5,#tmp1
-    call mul_32bit ;tmp2 = (((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3
+    call mul_32bit ;tmp2 = (((temp_raw>>4 - dig_T1)*(temp_raw>>4 - dig_T1)) >> 12) * dig_T3
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it 
     mov R5,#tmp2
     mov R6,#14
-    call shr_32bit ;tmp2 = ((((temp_read>>4 - cal_T1)*(temp_read>>4 - cal_T1)) >> 12) * cal_T3) >> 14
+    call shr_32bit ;tmp2 = ((((temp_raw>>4 - dig_T1)*(temp_raw>>4 - dig_T1)) >> 12) * dig_T3) >> 14
     mov R0,#tmp3
     mov R1,#tmp2
     call add_32bit ;tmp3 = tmp3 + tmp2
@@ -431,167 +345,134 @@ bmp280_compute:
     mov R5,#temp_real
     mov R6,#8
     call shr_32bit ;temp_real = (t_fine * 5 + 128) >> 8
-
     ;============ Pressure compensation ============
     ;Perform signed shift, flag already cleared
     mov R5,#tmp4
     mov R6,#1
     call shr_32bit ;tmp4 = tmp4 >> 1
-
     mov R0,#tmp1
     call zero_32bit ;Clear tmp1
-
     mov R0,#tmp1
     inc R0
     mov @R0,#$FA ;tmp1 = 0x0000FA00 = 64000
-
     mov R0,#tmp4
     mov R1,#tmp1
     call sub_32bit ;tmp4 = tmp4 - tmp1 = t_fine>>1 - 64000
-
     mov R0,#tmp1
     mov R1,#tmp4
     mov R6,#4
     call copy_32bit ;tmp1 = tmp4, preserve tmp4 as it is needed later
-
     ;Perform signed shift, flag already cleared
     mov R5,#tmp1
     mov R6,#2
     call shr_32bit ;tmp1 = tmp4>>2
-
     mov R0,#tmp2
     mov R1,#tmp1
     mov R6,#4
     call copy_32bit ;tmp2 = tmp1 = tmp4>>2
-
     mov R3,#tmp3
     mov R4,#tmp1
     mov R5,#tmp2
     call mul_32bit ;tmp3 = tmp1*tmp2 = (tmp4>>2)*(tmp4>>2)
-
     clr F0 ;Perform signed shift
     mov R5,#tmp3
     mov R6,#11
     call shr_32bit ;tmp3 = (tmp4>>2)*(tmp4>>2) >> 11
-
     ;Perform signed sign extension, flag already cleared
     mov R0,#tmp1
-    mov R1,#cal_P6
+    mov R1,#dig_P6
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P6 (16-bit)
-
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = dig_P6 (16-bit)
     mov R3,#tmp2
     mov R4,#tmp3
     mov R5,#tmp1
-    call mul_32bit ;tmp2 = ((tmp4>>2)*(tmp4>>2) >> 11)*cal_P6
-
+    call mul_32bit ;tmp2 = ((tmp4>>2)*(tmp4>>2) >> 11)*dig_P6
     mov R0,#tmp1
     mov R1,#tmp4
     mov R6,#4
     call copy_32bit ;tmp1 = tmp4, tmp4 is still needed later
-
     clr F0 ;Perform signed sign extension, clear flag after mul_32bit has set it 
     mov R0,#tmp3
-    mov R1,#cal_P5
+    mov R1,#dig_P5
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp3 (32-bit) = cal_P5 (16-bit)
-
+    call copy_32bit ;Copy 2 bytes - tmp3 (32-bit) = dig_P5 (16-bit)
     mov R3,#tmp5
     mov R4,#tmp1
     mov R5,#tmp3
-    call mul_32bit ;tmp5 = tmp1*tmp3 = tmp4*cal_P5
-
+    call mul_32bit ;tmp5 = tmp1*tmp3 = tmp4*dig_P5
     mov R5,#tmp5
     mov R6,#1
-    call shl_32bit ;tmp5 = (tmp4*cal_P5)<<1
-
+    call shl_32bit ;tmp5 = (tmp4*dig_P5)<<1
     mov R0,#tmp2
     mov R1,#tmp5
-    call add_32bit ;tmp2 = tmp2 + (tmp4*cal_P5)<<1
-
+    call add_32bit ;tmp2 = tmp2 + (tmp4*dig_P5)<<1
     clr F0 ;Perform signed sign extension, clear flag after mul_32bit has set it
     mov R0,#tmp1
-    mov R1,#cal_P4
+    mov R1,#dig_P4
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P4 (16-bit)
-
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = dig_P4 (16-bit)
     mov R5,#tmp1
     mov R6,#16
-    call shl_32bit ;tmp1 = cal_P4<<16
-
+    call shl_32bit ;tmp1 = dig_P4<<16
     ;Perform signed shift, flag already cleared
     mov R5,#tmp2
     mov R6,#2
     call shr_32bit ;tmp2 = tmp2>>2
-
     mov R0,#tmp2
     mov R1,#tmp1
-    call add_32bit ;tmp2 = tmp2>>2 + cal_P4<<16
-
+    call add_32bit ;tmp2 = tmp2>>2 + dig_P4<<16
     ;Perform signed sign extension, flag already cleared
     mov R0,#tmp1
-    mov R1,#cal_P2
+    mov R1,#dig_P2
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P2 (16-bit)
-
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = dig_P2 (16-bit)
     mov R0,#tmp3
     mov R1,#tmp4
     mov R6,#4
     call copy_32bit ;tmp3 = tmp4, still needed...
-
     ; mov R3,#tmp5 ;Optimization - already loaded with tmp5
     mov R4,#tmp1
     mov R5,#tmp3
-    call mul_32bit ; tmp5 = tmp1*tmp3 = cal_P2*tmp4
-
+    call mul_32bit ; tmp5 = tmp1*tmp3 = dig_P2*tmp4
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp5
     mov R6,#1
     call shr_32bit
-
     ;Perform signed shift, flag already cleared
     mov R5,#tmp4
     mov R6,#2
     call shr_32bit ;tmp4 = tmp4>>2
-
     mov R0,#tmp1
     mov R1,#tmp4
     mov R6,#4
     call copy_32bit ;tmp1 = tmp4
-
     mov R3,#tmp3
     mov R4,#tmp1
     mov R5,#tmp4
     call mul_32bit ;tmp3 = tmp1*tmp4 = (tmp4>>2)*(tmp4>>2)
-
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp3
     mov R6,#13
     call shr_32bit ;tmp3 = tmp3>>13 = (tmp4>>2)*(tmp4>>2)>>13
-
     ;Perform signed sign extension, flag already cleared
     mov R0,#tmp1
-    mov R1,#cal_P3
+    mov R1,#dig_P3
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P3 (16-bit)
-
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = dig_P3 (16-bit)
     mov R3,#tmp4
     mov R4,#tmp1
     mov R5,#tmp3
-    call mul_32bit ;tmp4 = tmp1*tmp3 = cal_P3*((tmp4>>2)*(tmp4>>2)>>13)
-
+    call mul_32bit ;tmp4 = tmp1*tmp3 = dig_P3*((tmp4>>2)*(tmp4>>2)>>13)
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp4
     mov R6,#3
-    call shr_32bit ;tmp4 = (cal_P3*((tmp4>>2)*(tmp4>>2)>>13))>>3
-
+    call shr_32bit ;tmp4 = (dig_P3*((tmp4>>2)*(tmp4>>2)>>13))>>3
     mov R0,#tmp4
     mov R1,#tmp5
-    call add_32bit ;tmp4 = cal_P3*((tmp4>>2)*(tmp4>>2)>>13) + (cal_P2*tmp4)>>1
-
+    call add_32bit ;tmp4 = dig_P3*((tmp4>>2)*(tmp4>>2)>>13) + (dig_P2*tmp4)>>1
     ;mov R5,#tmp4 ;Optimization - already loaded with tmp4
     mov R6,#18
-    call shr_32bit ;tmp4 = (cal_P3*((tmp4>>2)*(tmp4>>2)>>13) + (cal_P2*tmp4)>>1)>>18 (WTF Bosch, who the hell has come up with such equation...)
+    call shr_32bit ;tmp4 = (dig_P3*((tmp4>>2)*(tmp4>>2)>>13) + (dig_P2*tmp4)>>1)>>18 (WTF Bosch, who the hell has come up with such equation...)
     ; mov R0,#tmp1
     ; call zero_32bit ;Clear tmp1 ;last time tmp1 was used as argument to mul_32bit, so it's already zeroed
     mov R0,#tmp1
@@ -602,17 +483,17 @@ bmp280_compute:
     call add_32bit ;tmp1 = tmp4 + 32768
     cpl F0 ;Perform unsigned sign extension, flag was cleared so set it
     mov R0,#tmp3
-    mov R1,#cal_P1
+    mov R1,#dig_P1
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp3 (32-bit) = cal_P1 (16-bit)
+    call copy_32bit ;Copy 2 bytes - tmp3 (32-bit) = dig_P1 (16-bit)
     ; mov R3,#tmp4 ;Optimization - already loaded with tmp4
     mov R4,#tmp1
     mov R5,#tmp3
-    call mul_32bit ;tmp4 = tmp1*tmp3 = tmp1*cal_P1
+    call mul_32bit ;tmp4 = tmp1*tmp3 = tmp1*dig_P1
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp4
     mov R6,#15
-    call shr_32bit ;tmp4 = (tmp1*cal_P1)>>15
+    call shr_32bit ;tmp4 = (tmp1*dig_P1)>>15
     ; mov R0,#tmp1
     ; call zero_32bit ;Clear tmp1 ;last time tmp1 was used as argument to mul_32bit, so it's already zeroed
     mov R0,#tmp1
@@ -635,137 +516,135 @@ bmp280_compute_not_zero:
     inc R0
     mov @R0,#$10 ;tmp1 = 0x00100000 = 1048576
     mov R0,#tmp1
-    mov R1,#pres_read
-    call sub_32bit ;tmp1 = 1048576 - pres_read
+    mov R1,#pres_raw
+    call sub_32bit ;tmp1 = 1048576 - pres_raw
     ;Perform signed shift, flag already cleared
     mov R5,#tmp2
     mov R6,#12
     call shr_32bit ;tmp2 = tmp2>>12
     mov R0,#tmp1
     mov R1,#tmp2
-    call sub_32bit ;tmp1 = (1048576 - pres_read) - (tmp2>>12)
+    call sub_32bit ;tmp1 = (1048576 - pres_raw) - (tmp2>>12)
     mov R0,#tmp2
     call zero_32bit ;Clear tmp2
     mov R0,#tmp2
     mov @R0,#$35
     inc R0
     mov @R0,#$0C ;tmp2 = 0x00000C35 = 3125
-    mov R3,#tmp3
+    mov R3,#pres_real
     ;mov R4,#tmp1 ;Optimization - already loaded with tmp1
     ;mov R5,#tmp2 ;Optimization - already loaded with tmp2
-    call mul_32bit ;tmp3 = ((1048576 - pres_read) - (tmp2>>12))*3125
-    mov R0,#tmp3 ;Load tmp3 pointer to R0
+    call mul_32bit ;pres_real = ((1048576 - pres_raw) - (tmp2>>12))*3125
+    mov R0,#pres_real ;Load pres_real pointer to R0
     mov A,R0 ;Load R0 to A
     add A,#3 ;Move pointer to MSB
     mov R0,A ;Load A to R0
     mov A,@R0 ;Load MSB to A
     jb7 bmp280_compute_msb_set ;If MSB set
-    mov R5,#tmp3 ;If MSB not set
+    mov R5,#pres_real ;If MSB not set
     mov R6,#1
-    call shl_32bit ;tmp3 = tmp3<<1
+    call shl_32bit ;pres_real = pres_real<<1
     mov R3,#tmp1
     mov R4,#tmp4
-    ; mov R5,#tmp3 ;Optimization - already loaded with tmp3
-    call div_32bit ;tmp3 = tmp3/tmp4
+    ; mov R5,#pres_real ;Optimization - already loaded with pres_real
+    call div_32bit ;pres_real = pres_real/tmp4
     jmp bmp280_compute_continue
 bmp280_compute_msb_set:
-    ; mov R3,#tmp1 ;Optimization - already loaded with tmp3
+    ; mov R3,#tmp1 ;Optimization - already loaded with pres_real
     ; mov R4,#tmp4 ;Optimization - already loaded with tmp4
-    ; mov R5,#tmp3 ;Optimization - already loaded with tmp3
-    call div_32bit ;tmp3 = tmp3/tmp4
-    ; mov R5,#tmp3 ;Optimization - already loaded with tmp3
+    ; mov R5,#pres_real ;Optimization - already loaded with pres_real
+    call div_32bit ;pres_real = pres_real/tmp4
+    ; mov R5,#pres_real ;Optimization - already loaded with pres_real
     mov R6,#1
-    call shl_32bit ;tmp3 = tmp3<<1
+    call shl_32bit ;pres_real = pres_real<<1
 bmp280_compute_continue:
     mov R0,#tmp1
-    mov R1,#tmp3
+    mov R1,#pres_real
     mov R6,#4
-    call copy_32bit ;tmp1 = tmp3, preserve tmp3 as it is needed later
+    call copy_32bit ;tmp1 = pres_real, preserve pres_real as it is needed later
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp1
     mov R6,#3
-    call shr_32bit ;tmp1 = tmp1>>3 = tmp3>>3
+    call shr_32bit ;tmp1 = tmp1>>3 = pres_real>>3
     mov R0,#tmp2
     mov R1,#tmp1
     mov R6,#4
-    call copy_32bit ;tmp2 = tmp1 = tmp3>>3
+    call copy_32bit ;tmp2 = tmp1 = pres_real>>3
     mov R3,#tmp4
     mov R4,#tmp1
     mov R5,#tmp2
-    call mul_32bit ;tmp4 = tmp1*tmp2 = (tmp3>>3)*(tmp3>>3)
+    call mul_32bit ;tmp4 = tmp1*tmp2 = (pres_real>>3)*(pres_real>>3)
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp4
     mov R6,#13
-    call shr_32bit ;tmp4 = ((tmp3>>3)*(tmp3>>3))>>13
+    call shr_32bit ;tmp4 = ((pres_real>>3)*(pres_real>>3))>>13
     ;Perform signed sign extension, flag already cleared
     mov R0,#tmp1
-    mov R1,#cal_P9
+    mov R1,#dig_P9
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P9 (16-bit)
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = dig_P9 (16-bit)
     mov R3,#tmp2
     mov R4,#tmp1
     mov R5,#tmp4
-    call mul_32bit ;tmp2 = cal_P9*(((tmp3>>3)*(tmp3>>3))>>13)
+    call mul_32bit ;tmp2 = dig_P9*(((pres_real>>3)*(pres_real>>3))>>13)
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp2
     mov R6,#12
-    call shr_32bit ;tmp2 = (cal_P9*(((tmp3>>3)*(tmp3>>3))>>13))>>12, again great equation!
-
+    call shr_32bit ;tmp2 = (dig_P9*(((pres_real>>3)*(pres_real>>3))>>13))>>12, again great equation!
     mov R0,#tmp1
-    mov R1,#tmp3
+    mov R1,#pres_real
     mov R6,#4
-    call copy_32bit ;tmp1 = tmp3, preserve tmp3 as it is needed later
-
+    call copy_32bit ;tmp1 = pres_real, preserve pres_real as it is needed later
     ;Perform signed shift, flag already cleared
     mov R5,#tmp1
     mov R6,#2
-    call shr_32bit ;tmp1 = tmp1>>2 = tmp3>>2
-
+    call shr_32bit ;tmp1 = tmp1>>2 = pres_real>>2
     ;Perform signed sign extension, flag already cleared
     mov R0,#tmp4
-    mov R1,#cal_P8
+    mov R1,#dig_P8
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P8 (16-bit)
-
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = dig_P8 (16-bit)
     mov R3,#tmp5
     mov R4,#tmp1
     mov R5,#tmp4
-    call mul_32bit ;tmp5 = tmp1*tmp4 = (tmp3>>2)*cal_P8
-
+    call mul_32bit ;tmp5 = tmp1*tmp4 = (pres_real>>2)*dig_P8
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it
     mov R5,#tmp5
     mov R6,#13
-    call shr_32bit ;tmp5 = ((tmp3>>2)*cal_P8)>>13
-
-    ;Preserve tmp2 = var1, tmp5 = var2, tmp3 = p
-
+    call shr_32bit ;tmp5 = ((pres_real>>2)*dig_P8)>>13
     mov R0,#tmp2
     mov R1,#tmp5
     call add_32bit ;tmp2 = tmp2 + tmp5
-
     ;Perform signed sign extension, flag already cleared
     mov R0,#tmp1
-    mov R1,#cal_P7
+    mov R1,#dig_P7
     mov R6,#2
-    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = cal_P7 (16-bit)
-
+    call copy_32bit ;Copy 2 bytes - tmp1 (32-bit) = dig_P7 (16-bit)
     mov R0,#tmp2
     mov R1,#tmp1
-    call add_32bit ;tmp2 = tmp2 + cal_P7
-
+    call add_32bit ;tmp2 = tmp2 + dig_P7
     ;Perform signed shift, flag already cleared
     mov R5,#tmp2
     mov R6,#4
     call shr_32bit ;tmp2 = tmp2>>4
-
-    mov R0,#tmp3
+    mov R0,#pres_real
     mov R1,#tmp2
-    call add_32bit ; tmp3 = tmp3 + tmp2
-
+    call add_32bit ; pres_real = pres_real + tmp2
     ret
 
-;TODO check if some registers aren't loaded already with proper content
-;TODO tmp3 change to pres_real
+;R1 - pointer to value to write, uses R0,R1,R5,R6,R7
+uart_write_32bit:
+    mov R5,#4 ;Load loop counter
+    mov A,R1 ;Load pointer to value to A
+    add A,#3 ;Move pointer to MSB
+    mov R1,A ;Store value in R1
+uart_write_32bit_loop:
+    mov A,@R1
+    mov R0,A
+    call uart_write_byte
+    dec R1
+    djnz R5,uart_write_32bit_loop
+    ret
         
 ;R0	- byte to send, uses R0,R6,R7
 uart_write_byte:
@@ -787,7 +666,196 @@ uart_write_delay:
 	orl P2,#tx ;Set tx pin high - stop bit
 	call delay_100us
 	ret
-              
+
+;==================I2C routines=================	
+;No registers used
+i2c_start:
+	orl P2,#sda
+	orl P2,#scl ;SDA = 1, SCL = 1 -> idle state
+	anl P2,#~sda ;SDA = 1->0 while SCL = 1 -> START condition
+	anl P2,#~scl ;SCL to zero
+	ret
+	
+;No registers used	
+i2c_stop:
+	anl P2,#~sda ;SDA to zero
+	orl P2,#scl ;SCL to one
+	orl P2,#sda ;SDA to one - leave both lines in high state (bus idle)
+	ret
+	
+;R0 - byte to be sent, uses R0,R7	
+i2c_write_byte:
+	mov R7,#8 ;Load bit counter
+	mov A,R0 ;Load byte to be sent do A	
+i2c_write_loop:
+	jb7 i2c_write_one ;If MSB = 1, send one
+	anl P2,#~sda ;Otherwise send zero -> SDA = 0
+	jmp i2c_write_zero ;Skip part sending one
+i2c_write_one:
+	orl P2,#sda ;Send one -> SDA = 1
+i2c_write_zero:
+	orl P2,#scl ;SCL = 1
+	anl P2,#~scl ;SCL = 0
+	rl A ;Prepare next bit
+	djnz R7,i2c_write_loop ;Repeat for all 8 bits	
+	;Generate clock for ACK/NACK slave bit, but don't check its state
+	orl P2,#scl ;SCL = 1
+	anl P2,#~scl ;SCL = 0
+	ret		
+
+;R0 - received byte, F0 - ACK/NACK to be sent, uses F0,R0,R7
+i2c_read_byte:
+	mov R0,#0 ;Clear result
+	mov R7,#8 ;Load bit counter
+	orl P2,#sda ;SDA = 1
+i2c_read_loop:
+	orl P2,#scl ;SCL = 1	
+	mov A,R0
+	rl A
+	mov R0,A ;Shift bits in result left	
+	in A,P2
+	anl A,#sda ;Obtain SDA line state
+	jnz i2c_read_one ;If SDA == 1
+	jmp i2c_read_zero ;If SDA == 0	
+i2c_read_one: ;If SDA == 1...
+	mov A,R0
+	inc A
+	mov R0,A ;...set last bit in result
+i2c_read_zero: ;If SDA == 0 do nothing with result
+	anl P2,#~scl ;SCL = 0
+	djnz R7,i2c_read_loop ;Repeat for all 8 bits	
+    ;Send ACK/NACK
+	jf0 i2c_read_send_nack ;If requested to send NACK
+	anl P2,#~sda ;If requested to send ACK, SDA = 0 -> send ACK
+	jmp i2c_read_end 	
+i2c_read_send_nack:
+	orl P2,#sda ;SDA = 1 -> send NACK
+i2c_read_end:
+	orl P2,#scl ;SCL = 1
+	anl P2,#~scl ;SCL = 0
+	ret
+
+bmp280_configure:
+    call i2c_start ;Start transmission	
+	mov R0,#bmp280_wr_addr
+	call i2c_write_byte ;Send BMP280 write address	
+	mov R0,#0xF4
+	call i2c_write_byte ;Set register pointer 
+
+    mov R0,#%00100111
+    call i2c_write_byte
+    mov R0,#%11100000
+    call i2c_write_byte
+
+    call i2c_stop
+
+    ret
+
+bmp280_get_cal_regs:
+    call i2c_start ;Start transmission	
+	mov R0,#bmp280_wr_addr
+	call i2c_write_byte ;Send BMP280 write address	
+	mov R0,#bmp280_dig_T1_LSB
+	call i2c_write_byte ;Set register pointer to first config register
+    call i2c_start ;Restart transmission	
+	mov R0,#bmp280_rd_addr
+	call i2c_write_byte ;Send BMP280 read address
+
+    mov R6,#bmp280_cal_regs_size-1 ;Load loop counter
+    mov R1,#dig_T1 ;Load RAM pointer
+    clr F0 ;Get size-1 bytes with ACK
+read_dig_loop:
+    call i2c_read_byte ;Read byte
+    mov A,R0 
+    mov @R1,A ;Store read byte at address pointer by R1
+    inc R1 ;Move R1 to next address
+    djnz R6,read_dig_loop ;Repeat size-1 times
+
+    cpl F0 ;Get last byte with NACK 
+    call i2c_read_byte ;Read byte
+    mov A,R0
+    mov @R1,A ;Store read byte at address pointer by R1
+    ret
+
+bmp280_get_raw_meas:
+    mov R0,#pres_raw
+    call zero_32bit ;Clear pres_raw
+    mov R0,#temp_raw
+    call zero_32bit ;Clear temp_raw
+    mov R0,#tmp1
+    call zero_32bit ;Clear tmp1
+    mov R0,#tmp2
+    call zero_32bit ;Clear tmp2
+
+    call i2c_start ;Start transmission	
+	mov R0,#bmp280_wr_addr
+	call i2c_write_byte ;Send BMP280 write address	
+	mov R0,#bmp280_pres_MSB
+	call i2c_write_byte ;Set register pointer to first measurement register
+    call i2c_start ;Restart transmission	
+	mov R0,#bmp280_rd_addr
+	call i2c_write_byte ;Send BMP280 read address
+    clr F0 ;Send ACK
+    call i2c_read_byte ;Read byte
+    mov A,R0
+    mov R0,#pres_raw
+    mov @R0,A ;Load read byte to pres_raw
+    call i2c_read_byte ;Read byte
+    mov A,R0
+    mov R0,#tmp1
+    mov @R0,A ;Load read byte to tmp1
+    call i2c_read_byte ;Read byte
+    mov A,R0
+    mov R0,#tmp2
+    mov @R0,A ;Load read byte to tmp2
+    mov R2,#pres_raw
+    mov R3,#tmp1
+    mov R4,#tmp2
+    call bmp280_merge_reg ;Merge read values into one and store in pres_raw
+
+    mov R0,#tmp1
+    call zero_32bit ;Clear tmp1
+    mov R0,#tmp2
+    call zero_32bit ;Clear tmp2
+    call i2c_read_byte ;Read byte
+    mov A,R0
+    mov R0,#temp_raw
+    mov @R0,A ;Load read byte to temp_raw
+    call i2c_read_byte ;Read byte
+    mov A,R0
+    mov R0,#tmp1
+    mov @R0,A ;Load read byte to tmp1
+    call i2c_read_byte ;Read byte
+    mov A,R0
+    mov R0,#tmp2
+    mov @R0,A ;Load read byte to tmp2
+    mov R2,#temp_raw
+    mov R3,#tmp1
+    mov R4,#tmp2
+    call bmp280_merge_reg ;Merge read values into one and store in temp_raw
+    call i2c_stop ;Finish transmission
+    ret
+
+;R2 - pointer to MSB and result, R3 - pointer to LSB, R4 - pointer to XLSB
+bmp280_merge_reg:
+    >movr R5,R2 ;Load pointer to MSB to R5
+    mov R6,#12
+    call shl_32bit ;MSB = MSB<<12
+    >movr R5,R3 ;Load pointer to LSB to R5
+    mov R6,#4
+    call shl_32bit ;LSB = LSB<<4
+    >movr R0,R2
+    >movr R1,R3
+    call add_32bit ;MSB = MSB + LSB
+    clr F0 ;Perform signed shift
+    >movr R5,R4 ;Load pointer to XLSB to R5
+    mov R6,#4
+    call shr_32bit ;XLSB = XLSB>>4
+    >movr R0,R2
+    >movr R1,R4
+    call add_32bit ;MSB = MSB + XLSB = MSB<<12 + LSB<<4 + XLSB>>4
+    ret
+
 ;~100uS delay, uses R7
 delay_100us:
 	mov R7,#28
@@ -809,4 +877,97 @@ delay_ms_loop:
 	nop
 	djnz R7,delay_ms_loop
 	djnz R6,delay_ms
+	ret
+
+    ;R0 - byte, R1 - cmd/data switch, uses R0,R1
+lcd_write:
+	anl P2,#%11011111 ;Clear RS
+	;Test whether data or cmd will be sent
+	mov A,R1 ;Load R1 to A to test if zero
+	jz skip_rs ;Skip RS line setting - cmd will be sent
+	orl P2,#%00100000 ;Set RS line - data will be sent
+skip_rs:
+	;Send upper nibble
+	mov A,R0 ;Load byte to A
+	anl A,#%11110000 ;Mask lower nibble
+	outl P1,A ;Send data to P1
+	
+	orl P2,#%00010000 ;Set E line
+	call delay_500us ;Wait for LCD	
+	anl P2,#%11101111 ;Clear E line
+	call delay_500us ;Wait for LCD
+	
+	;Send lower nibble
+	mov A,R0 ;Load byte to A
+	swap A ;Swap nibbles
+	anl A,#%11110000 ;Mask lower nibble
+	outl P1,A ;Send data to P1
+	
+	orl P2,#%00010000 ;Set E line
+	call delay_500us ;Wait for LCD	
+	anl P2,#%11101111 ;Clear E line
+	call delay_500us ;Wait for LCD	
+	ret
+	
+;R0 - y, R1 - x, uses R0,R1	
+lcd_gotoxy:
+	mov A,R1
+	jnz second_row ;Check row
+	mov A,#$80 ;If first, load address of its first position
+	jmp lcd_gotoxy_write
+second_row:
+	mov A,#$C0 ;If second, load address of its first position
+lcd_gotoxy_write:
+	add A,R0 ;Add offset (y)
+	mov R0,A
+	mov R1,#0
+	call lcd_write ;Send command
+	ret
+	
+;Uses R0,R1,R6,R7	
+lcd_init:
+	mov R1,#0 ;Whole subroutine will be sending commands
+	
+	mov R0,#$30	
+	call lcd_write ;Weird 4-bit init command first time...
+	mov R6,#5
+	call delay_ms ;Wait 5ms
+	
+	mov R0,#$30
+	call lcd_write ;Weird repeated 4-bit init command second time...
+	mov R6,#1
+	call delay_ms ;Wait 1ms
+	
+	mov R0,#$30
+	call lcd_write ;Weird repeated 4-bit init command third time...
+	mov R6,#1
+	call delay_ms ;Wait 1ms
+
+	mov R0,#$02
+	call lcd_write ;Init 4-bit mode
+	
+	mov R0,#$28
+	call lcd_write ;2 lines, 5*8 matrix, 4-bit
+	
+	mov R0,#$0C
+	call lcd_write ;Display on, cursor off
+	
+	mov R0,#$06
+	call lcd_write ;Autoincrement cursor position, text scroll off
+	
+	call lcd_cls ;Clear screen
+	ret
+	
+;Uses R0,R1,R6,R7	
+lcd_cls:
+	mov R1,#0
+	mov R0,#$01	
+	call lcd_write ;Clear display
+	mov R6,#1
+	call delay_ms ;Wait 1ms
+	
+	mov R0,#$80
+	call lcd_write ;Set cursor at first place in upper row
+	mov R6,#1
+	call delay_ms ;Wait 1ms
 	ret
