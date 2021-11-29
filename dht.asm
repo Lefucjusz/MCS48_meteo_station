@@ -41,8 +41,6 @@ loop:
 ;Constants
 
 ;Subroutines
-;TODO move delay_70us into dht11_read_rh, as it is needed only once
-;TODO check if clearing result is needed
 ;R0 - value of RH in percent, uses and destroys R0,R6,R7
 dht11_read_rh:
     mov R0,#0
