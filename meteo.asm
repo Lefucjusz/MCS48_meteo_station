@@ -66,6 +66,25 @@ movr    .ma Rx,Ry ;Moves Ry to Rx (Rx = Ry)
 	jmp main
 
 main:
+    mov R3,#wifi
+    call uart_string
+    mov R6,#250
+    call delay_ms
+    mov R6,#250
+    call delay_ms
+    mov R6,#250
+    call delay_ms
+    mov R6,#250
+    call delay_ms
+    mov R6,#250
+    call delay_ms
+    mov R6,#250
+    call delay_ms
+    mov R6,#250
+    ; call delay_ms
+    ; mov R6,#250
+    ; call delay_ms
+
     call bmp280_configure
     call bmp280_get_cal_regs
 
@@ -80,7 +99,9 @@ main:
 loop:
     call bmp280_get_raw_meas
     call bmp280_compute
-    call bmp280_display
+    call send_data
+    ; call bmp280_display
+   
 
     ; mov R1,#pres_real
     ; call uart_write_32bit
@@ -292,6 +313,28 @@ split_32bit_loop:
     djnz R7,split_32bit_loop
     ret
 
+
+    .ot
+wifi        .az /AT+CWJAP_CUR="xxxxx","xxxxx"/,#$0D,#$0A
+tcp_start   .az /AT+CIPSTART="TCP","192.168.8.111",3000/,#$0D,#$0A
+tcp_send    .az /AT+CIPSEND=104/,#$0D,#$0A
+post        .az /POST /,#$2F,/ HTTP/,#$2F,/1.1/,#$0D,#$0A,/Content-Length: 31/,#$0D,#$0A,/Content-Type: application/,#$2F,/json/,#$0D,#$0A,#$0D,#$0A,/{"temp":"/
+json1       .az /","pres":"/
+json2       .az /"}/,#$0D,#$0A
+
+;R3 - pointer to string in ROM
+uart_string:
+    mov A,R3 ;Load string pointer to A
+    movp A,@A ;Load char from ROM to A
+    .ct
+    jz uart_string_end ;If end of the string - finish
+    mov R0,A ;Load A to R0
+    call uart_write_byte ;Send char
+    inc R3 ;Move pointer to next char
+    jmp uart_string ;Loop until end of the string
+uart_string_end:
+    ret
+
 ;R1 - pointer to value to write, uses R0,R1,R5,R6,R7
 uart_write_32bit:
     mov R5,#4 ;Load loop counter
@@ -305,6 +348,7 @@ uart_write_32bit_loop:
     dec R1
     djnz R5,uart_write_32bit_loop
     ret
+
         
 ;R0	- byte to send, uses R0,R6,R7
 uart_write_byte:
@@ -873,35 +917,74 @@ bmp280_display_loop2:
     djnz R4,bmp280_display_loop2
     ret
 
-    .ot
-pres_text   .az /Pressure: /
-temp_text   .az /Temperature: /
-hpa_text    .az /hPa/
-deg_c_text  .az #$DF,/C/
 
-;R2 - pointer to string in ROM
-lcd_string:
-    mov R1,#1 ;Send data to LCD
-lcd_string_loop:
-    mov A,R3 ;Load string pointer to A
-    movp A,@A ;Load char from ROM to A
-    .ct
-    jz lcd_string_end ;If end of the string - finish
-    mov R0,A ;Load A to R0
-    call lcd_write ;Send char to LCD
-    inc R3 ;Move pointer to next char
-    jmp lcd_string_loop ;Loop until end of the string
-lcd_string_end:
-    ret
+;==================I2C routines=================	
+;No registers used
+i2c_start:
+	orl P2,#sda
+	orl P2,#scl ;SDA = 1, SCL = 1 -> idle state
+	anl P2,#~sda ;SDA = 1->0 while SCL = 1 -> START condition
+	anl P2,#~scl ;SCL to zero
+	ret
+	
+;No registers used	
+i2c_stop:
+	anl P2,#~sda ;SDA to zero
+	orl P2,#scl ;SCL to one
+	orl P2,#sda ;SDA to one - leave both lines in high state (bus idle)
+	ret
+	
+;R0 - byte to be sent, uses R0,R7	
+i2c_write_byte:
+	mov R7,#8 ;Load bit counter
+	mov A,R0 ;Load byte to be sent do A	
+i2c_write_loop:
+	jb7 i2c_write_one ;If MSB = 1, send one
+	anl P2,#~sda ;Otherwise send zero -> SDA = 0
+	jmp i2c_write_zero ;Skip part sending one
+i2c_write_one:
+	orl P2,#sda ;Send one -> SDA = 1
+i2c_write_zero:
+	orl P2,#scl ;SCL = 1
+	anl P2,#~scl ;SCL = 0
+	rl A ;Prepare next bit
+	djnz R7,i2c_write_loop ;Repeat for all 8 bits	
+	;Generate clock for ACK/NACK slave bit, but don't check its state
+	orl P2,#scl ;SCL = 1
+	anl P2,#~scl ;SCL = 0
+	ret		
 
-;R0 - digit to be displayed
-lcd_digit:
-    mov A,R0
-    add A,#$30 ;ASCII code for '0'
-    mov R0,A
-    mov R1,#1
-    call lcd_write
-    ret
+;R0 - received byte, F0 - ACK/NACK to be sent, uses F0,R0,R7
+i2c_read_byte:
+	mov R0,#0 ;Clear result
+	mov R7,#8 ;Load bit counter
+	orl P2,#sda ;SDA = 1
+i2c_read_loop:
+	orl P2,#scl ;SCL = 1	
+	mov A,R0
+	rl A
+	mov R0,A ;Shift bits in result left	
+	in A,P2
+	anl A,#sda ;Obtain SDA line state
+	jnz i2c_read_one ;If SDA == 1
+	jmp i2c_read_zero ;If SDA == 0	
+i2c_read_one: ;If SDA == 1...
+	mov A,R0
+	inc A
+	mov R0,A ;...set last bit in result
+i2c_read_zero: ;If SDA == 0 do nothing with result
+	anl P2,#~scl ;SCL = 0
+	djnz R7,i2c_read_loop ;Repeat for all 8 bits	
+    ;Send ACK/NACK
+	jf0 i2c_read_send_nack ;If requested to send NACK
+	anl P2,#~sda ;If requested to send ACK, SDA = 0 -> send ACK
+	jmp i2c_read_end 	
+i2c_read_send_nack:
+	orl P2,#sda ;SDA = 1 -> send NACK
+i2c_read_end:
+	orl P2,#scl ;SCL = 1
+	anl P2,#~scl ;SCL = 0
+	ret
 
 ;R0 - byte, R1 - cmd/data switch, uses R0,R1,R2
 lcd_write:
@@ -1003,6 +1086,100 @@ lcd_gotoxy_write:
 	mov R1,#0
 	call lcd_write ;Send command
 	ret
+
+     .ot
+pres_text   .az /Pressure: /
+temp_text   .az /Temperature: /
+hpa_text    .az /hPa/
+deg_c_text  .az #$DF,/C/
+
+;R2 - pointer to string in ROM
+lcd_string:
+    mov R1,#1 ;Send data to LCD
+lcd_string_loop:
+    mov A,R3 ;Load string pointer to A
+    movp A,@A ;Load char from ROM to A
+    .ct
+    jz lcd_string_end ;If end of the string - finish
+    mov R0,A ;Load A to R0
+    call lcd_write ;Send char to LCD
+    inc R3 ;Move pointer to next char
+    jmp lcd_string_loop ;Loop until end of the string
+lcd_string_end:
+    ret
+
+send_data:
+    mov R3,#tcp_start
+    call uart_string
+    mov R6,#250
+    call delay_ms
+    mov R6,#250
+    call delay_ms
+
+    mov R3,#tcp_send
+    call uart_string
+    mov R6,#250
+    call delay_ms
+    mov R6,#250
+    call delay_ms
+
+    mov R3,#post
+    call uart_string
+
+    mov R0,#13
+    mov R1,#0
+    call lcd_gotoxy
+
+    mov R5,#temp_real
+    call split_32bit
+
+    mov R4,#4
+    mov R1,#num_ascii+2
+json_loop1:
+    mov A,@R1
+    mov R0,A
+    call lcd_write
+    call uart_write_byte
+    inc R1
+    djnz R4,json_loop1
+
+    mov R3,#json1
+    call uart_string
+
+    mov R0,#10
+    mov R1,#1
+    call lcd_gotoxy
+
+    mov R5,#pres_real
+    call split_32bit
+
+    mov R4,#6
+    mov R1,#num_ascii
+json_loop2:
+    mov A,@R1
+    mov R0,A
+    call lcd_write
+    call uart_write_byte
+    inc R1
+    djnz R4,json_loop2
+
+    mov R3,#json2
+    call uart_string
+    mov R6,#250
+    call delay_ms
+    mov R6,#250
+    call delay_ms
+    ret
+
+;R6 - delay time in msec, uses R6,R7
+delay_ms:
+	mov R7,#228
+delay_ms_loop:
+	nop
+	djnz R7,delay_ms_loop
+	djnz R6,delay_ms
+	ret
+
 ;~100uS delay, uses R7
 delay_100us:
 	mov R7,#28
@@ -1017,81 +1194,8 @@ delay_500us_loop:
 	djnz R7,delay_500us_loop
 	ret
 
-;R6 - delay time in msec, uses R6,R7
-delay_ms:
-	mov R7,#228
-delay_ms_loop:
-	nop
-	djnz R7,delay_ms_loop
-	djnz R6,delay_ms
-	ret
 
-;==================I2C routines=================	
-;No registers used
-i2c_start:
-	orl P2,#sda
-	orl P2,#scl ;SDA = 1, SCL = 1 -> idle state
-	anl P2,#~sda ;SDA = 1->0 while SCL = 1 -> START condition
-	anl P2,#~scl ;SCL to zero
-	ret
-	
-;No registers used	
-i2c_stop:
-	anl P2,#~sda ;SDA to zero
-	orl P2,#scl ;SCL to one
-	orl P2,#sda ;SDA to one - leave both lines in high state (bus idle)
-	ret
-	
-;R0 - byte to be sent, uses R0,R7	
-i2c_write_byte:
-	mov R7,#8 ;Load bit counter
-	mov A,R0 ;Load byte to be sent do A	
-i2c_write_loop:
-	jb7 i2c_write_one ;If MSB = 1, send one
-	anl P2,#~sda ;Otherwise send zero -> SDA = 0
-	jmp i2c_write_zero ;Skip part sending one
-i2c_write_one:
-	orl P2,#sda ;Send one -> SDA = 1
-i2c_write_zero:
-	orl P2,#scl ;SCL = 1
-	anl P2,#~scl ;SCL = 0
-	rl A ;Prepare next bit
-	djnz R7,i2c_write_loop ;Repeat for all 8 bits	
-	;Generate clock for ACK/NACK slave bit, but don't check its state
-	orl P2,#scl ;SCL = 1
-	anl P2,#~scl ;SCL = 0
-	ret		
 
-;R0 - received byte, F0 - ACK/NACK to be sent, uses F0,R0,R7
-i2c_read_byte:
-	mov R0,#0 ;Clear result
-	mov R7,#8 ;Load bit counter
-	orl P2,#sda ;SDA = 1
-i2c_read_loop:
-	orl P2,#scl ;SCL = 1	
-	mov A,R0
-	rl A
-	mov R0,A ;Shift bits in result left	
-	in A,P2
-	anl A,#sda ;Obtain SDA line state
-	jnz i2c_read_one ;If SDA == 1
-	jmp i2c_read_zero ;If SDA == 0	
-i2c_read_one: ;If SDA == 1...
-	mov A,R0
-	inc A
-	mov R0,A ;...set last bit in result
-i2c_read_zero: ;If SDA == 0 do nothing with result
-	anl P2,#~scl ;SCL = 0
-	djnz R7,i2c_read_loop ;Repeat for all 8 bits	
-    ;Send ACK/NACK
-	jf0 i2c_read_send_nack ;If requested to send NACK
-	anl P2,#~sda ;If requested to send ACK, SDA = 0 -> send ACK
-	jmp i2c_read_end 	
-i2c_read_send_nack:
-	orl P2,#sda ;SDA = 1 -> send NACK
-i2c_read_end:
-	orl P2,#scl ;SCL = 1
-	anl P2,#~scl ;SCL = 0
-	ret
+
 
 
