@@ -317,8 +317,8 @@ split_32bit_loop:
     .ot
 wifi        .az /AT+CWJAP_CUR="xxxxx","xxxxx"/,#$0D,#$0A
 tcp_start   .az /AT+CIPSTART="TCP","192.168.8.111",3000/,#$0D,#$0A
-tcp_send    .az /AT+CIPSEND=104/,#$0D,#$0A
-post        .az /POST /,#$2F,/ HTTP/,#$2F,/1.1/,#$0D,#$0A,/Content-Length: 31/,#$0D,#$0A,/Content-Type: application/,#$2F,/json/,#$0D,#$0A,#$0D,#$0A,/{"temp":"/
+tcp_send    .az /AT+CIPSEND=102/,#$0D,#$0A
+post        .az /POST /,#$2F,/ HTTP/,#$2F,/1.1/,#$0D,#$0A,/Content-Length: 29/,#$0D,#$0A,/Content-Type: application/,#$2F,/json/,#$0D,#$0A,#$0D,#$0A,/{"temp":"/
 json1       .az /","pres":"/
 json2       .az /"}/,#$0D,#$0A
 
@@ -1004,9 +1004,9 @@ skip_rs:
     outl P1,A ;Write A to P1
 	
 	orl P1,#e ;Set E line
-	call delay_500us ;Wait for LCD	
+	; call delay_500us ;Wait for LCD	
 	anl P1,#~e ;Clear E line
-	call delay_500us ;Wait for LCD
+	; call delay_500us ;Wait for LCD
 	
 	;Send lower nibble
 	in A,P1 ;Load port state to A
@@ -1019,9 +1019,9 @@ skip_rs:
     outl P1,A ;Write A to P1
 	
 	orl P1,#e ;Set E line
-	call delay_500us ;Wait for LCD	
+	; call delay_500us ;Wait for LCD	
 	anl P1,#~e ;Clear E line
-	call delay_500us ;Wait for LCD	
+	; call delay_500us ;Wait for LCD	
 	ret
 	
 ;Uses R0,R1,R6,R7	
@@ -1054,8 +1054,8 @@ lcd_init:
 	
 	mov R0,#$30
 	call lcd_write ;Weird repeated 4-bit init command third time...
-	mov R6,#1
-	call delay_ms ;Wait 1ms
+	; mov R6,#1
+	; call delay_ms ;Wait 1ms
 
 	mov R0,#$02
 	call lcd_write ;Init 4-bit mode
@@ -1130,38 +1130,44 @@ send_data:
     mov R1,#0
     call lcd_gotoxy
 
-    mov R5,#temp_real
-    call split_32bit
+    mov R1,#temp_real
+    call uart_write_32bit
 
-    mov R4,#4
-    mov R1,#num_ascii+2
-json_loop1:
-    mov A,@R1
-    mov R0,A
-    call lcd_write
-    call uart_write_byte
-    inc R1
-    djnz R4,json_loop1
+;     mov R5,#temp_real
+;     call split_32bit
+
+;     mov R4,#4
+;     mov R1,#num_ascii+2
+; json_loop1:
+;     mov A,@R1
+;     mov R0,A
+;     call lcd_write
+;     call uart_write_byte
+;     inc R1
+;     djnz R4,json_loop1
 
     mov R3,#json1
     call uart_string
 
-    mov R0,#10
-    mov R1,#1
-    call lcd_gotoxy
+;     mov R0,#10
+;     mov R1,#1
+;     call lcd_gotoxy
 
-    mov R5,#pres_real
-    call split_32bit
+;     mov R5,#pres_real
+;     call split_32bit
 
-    mov R4,#6
-    mov R1,#num_ascii
-json_loop2:
-    mov A,@R1
-    mov R0,A
-    call lcd_write
-    call uart_write_byte
-    inc R1
-    djnz R4,json_loop2
+;     mov R4,#6
+;     mov R1,#num_ascii
+; json_loop2:
+;     mov A,@R1
+;     mov R0,A
+;     call lcd_write
+;     call uart_write_byte
+;     inc R1
+;     djnz R4,json_loop2
+
+    mov R1,#pres_real
+    call uart_write_32bit
 
     mov R3,#json2
     call uart_string
@@ -1178,22 +1184,102 @@ delay_ms_loop:
 	nop
 	djnz R7,delay_ms_loop
 	djnz R6,delay_ms
-	ret
+	ret 
 
-;~100uS delay, uses R7
-delay_100us:
-	mov R7,#28
-delay_100us_loop:
-	djnz R7,delay_500us_loop
-	ret
-
-;~500uS delay, uses R7
+    ;~500uS delay, uses R7
 delay_500us:
 	mov R7,#164
 delay_500us_loop:
 	djnz R7,delay_500us_loop
 	ret
 
+;~100uS delay, uses R7
+delay_100us:
+	mov R7,#28
+delay_100us_loop:
+	djnz R7,delay_100us_loop
+	ret
+
+    ;No registers used
+ow_reset:
+	anl P1,#~ow_pin ;Clear 1-Wire pin
+	call delay_500us ;Hold low for 500us
+	orl P1,#ow_pin ;Set 1-Wire pin
+	call delay_500us ;Wait for 500us for timeslot to end
+	ret
+
+;R0 - byte to be written, uses R0,R1,R7	
+ow_write_byte:
+	mov A,R0 ;Load byte to A
+	cpl A ;Because of 8049 limitations - there's no jnbx instruction...
+	mov R1,#8 ;Load bit loop counter
+ow_write_loop:
+	mov R7,#16 ;Load delay loop counter; ~3us
+	anl P1,#~ow_pin ;Clear 1-Wire pin; ~3us
+	jb0 ow_write_zero ;Check LSB, if not set - send zero; ~3us
+ow_write_one:
+	orl P1,#ow_pin ;Set 1-Wire pin; ~3us
+ow_write_zero:
+	djnz R7,ow_write_zero ;Wait for ~50us	
+	orl P1,#ow_pin ;Set 1-Wire pin; ~3us
+	rr A ;Shift byte one bit right; ~1.5us
+	djnz R1,ow_write_loop ;Write next bit; ~3us
+	ret
+
+;R0 - received byte, uses R0,R1,R7
+ow_read_byte:
+	mov R0,#0 ;Clear result
+	mov R1,#8 ;Load bit loop counter
+ow_read_loop:
+	mov R7,#10 ;Load delay loop counter; ~3us
+	;Shift result one bit right
+	mov A,R0 ;~1.5us
+	rr A ;~1.5us
+	mov R0,A ;~1.5us	
+	;Request read - 1-Wire pin >1us low
+	anl P1,#~ow_pin ;Clear 1-Wire pin; ~3us
+	nop ;Wait for ~1.5us
+	orl P1,#ow_pin ;Set 1-Wire pin; ~3us
+	;Read bit and complete 60us timeslot
+	in A,P1 ;Read P1; ~3us
+	anl A,#ow_pin ;Read 1-Wire pin; ~3us
+	jz ow_read_zero ;~3us
+ow_read_one:
+	mov A,R0 ;~1.5us
+	orl A,#ow_pin ;~3us
+	mov R0,A ;Set bit in result; ~1.5us
+ow_read_zero:
+	djnz R7,ow_read_zero ;Wait for ~30us; ~3us	
+	djnz R1,ow_read_loop ;Receive next bit; ~3us
+	ret
+
+;Uses R0,R1,R2,R7
+temp_get:
+	call ow_reset ;Send bus reset condition
+	mov R0,#skip_rom ;Skip ROM
+	call ow_write_byte
+	mov R0,#read_scratchpad ;Read scratchpad
+	call ow_write_byte
+	
+	call ow_read_byte 
+	mov A,R0
+	mov R2,A ;Store received byte in R2
+
+	call ow_read_byte
+    ; call uart_write_byte
+
+    ; mov A,R2
+    ; mov R0,A
+    ; call uart_write_byte
+	
+	call temp_convert
+
+	call ow_reset ;Send bus reset condition
+	mov R0,#skip_rom ;Skip ROM
+	call ow_write_byte
+	mov R0,#convert_t ;Convert temp - prepare to read next time
+	call ow_write_byte
+	ret	
 
 
 

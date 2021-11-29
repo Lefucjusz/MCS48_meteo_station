@@ -5,4 +5,6 @@
 !.gitignore
 !README.md
 !meteo.asm
+!dht.asm
+!ds18b20.asm
 !rom.bin
