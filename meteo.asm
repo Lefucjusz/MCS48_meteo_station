@@ -58,7 +58,7 @@ bmp280_pres_real    .eq $58 ;32-bit
 dht11_humid         .eq $5C ;8-bit
 ds18b20_temp_raw    .eq $5D ;16-bit
 
-ascii_num .eq $5F ;6 bytes
+digit_buf .eq $5F ;6 bytes
 
 ;======================== Macros ========================
 swap    .ma Rx,Ry ;Swaps two registers
@@ -72,16 +72,37 @@ movr    .ma Rx,Ry ;Moves Ry to Rx (Rx = Ry)
         mov ]1,A ;Move A to Rx
         .em
 
+sub     .ma A,V ;Subtracts V (Rx or immediate value) from A (A = A - V)
+        cpl A
+        add A,]2
+        cpl A
+        .em
+
 ;======================== Vectors ========================
 	.no $00 ;Set jump to main at reset vector (00h)
 	jmp main
 
 ;======================== Main ========================
 main:
+    mov R3,#wifi
+    call uart_string
     call lcd_init
     call bmp280_write_config
     call bmp280_read_cal_regs
 loop:
+    mov R3,#tcp_start
+    call uart_string
+    mov R6,#250
+    call delay_ms
+    mov R3,#tcp_send
+    call uart_string
+    mov R6,#250
+    call delay_ms
+    mov R3,#post
+    call uart_string
+    mov R3,#json1
+    call uart_string
+
     call bmp280_read_raw_meas
     call bmp280_compute_values
     call disp_bmp
@@ -93,11 +114,10 @@ loop:
     call dht11_read_rh
     call dht11_value_to_ascii
     call disp_dht
-
-    mov R6,#250
-    call delay_ms
-    mov R6,#250
-    call delay_ms
+    
+    call delay_50s
+    ; mov R6,#250
+    ; call delay_ms
 
 	jmp loop
 
@@ -487,7 +507,6 @@ split_32bit_loop:
     mov R0,A ;Store address in R0
     mov R1,#tmp3 ;Load pointer to digit to R1
     mov A,@R1 ;Load digit
-    add A,#$30 ;Add ASCII code of '0'
     mov @R0,A ;Load digit to array
     djnz R7,split_32bit_loop
     ret
@@ -499,6 +518,30 @@ delay_100us:
 delay_100us_loop:
 	djnz R7,delay_100us_loop
 	ret
+
+   .ot
+wifi        .az /AT+CWJAP_CUR="xxxxx","xxxxx"/,#$0D,#$0A
+tcp_start   .az /AT+CIPSTART="TCP","192.168.8.69",3000/,#$0D,#$0A
+tcp_send    .az /AT+CIPSEND=135/,#$0D,#$0A
+post        .az /POST /,#$2F,/ HTTP/,#$2F,/1.1/,#$0D,#$0A,/Content-Length: 62/,#$0D,#$0A,/Content-Type: application/,#$2F,/json/,#$0D,#$0A,#$0D,#$0A
+json1       .az /{"name":"MCS48","ti":"/
+json2       .az /","p":"/
+json3       .az /","to":"/
+json4       .az /","h":"/
+json5       .az /"}/,#$0D,#$0A
+
+    ;R3 - pointer to string in ROM
+uart_string:
+    mov A,R3 ;Load string pointer to A
+    movp A,@A ;Load char from ROM to A
+    .ct
+    jz uart_string_end ;If end of the string - finish
+    mov R0,A ;Load A to R0
+    call uart_write_byte ;Send char
+    inc R3 ;Move pointer to next char
+    jmp uart_string ;Loop until end of the string
+uart_string_end:
+    ret
 
 ;~500uS delay, uses and corrupts R7
 delay_500us:
@@ -515,6 +558,7 @@ delay_ms_loop:
 	djnz R7,delay_ms_loop
 	djnz R6,delay_ms
 	ret 
+
 
 ;======================== BMP280 routines ========================
 ;Uses and corrupts R0,R7
@@ -1062,8 +1106,7 @@ dht11_read_rh_continue:
     ret
 
 ;TODO uses
-dht11_value_to_ascii:
-    mov R0,#tmp1
+dht11_value_to_digits:
     mov R1,#dht11_humid
     mov R7,#1
     call copy_32bit
@@ -1099,7 +1142,7 @@ ds18b20_read_temp:
 	ret	
 
 ;TODO add uses, add negative numbers support
-ds18b20_value_to_ascii:
+ds18b20_value_to_digits:
     mov R0,#tmp2
     mov R1,#ds18b20_temp_raw
     mov R7,#2
@@ -1122,6 +1165,26 @@ ds18b20_value_to_ascii:
     call split_32bit
     ret
 
+;R3 - number of digits to display, R4 - decimal point position from end of number
+display_number:
+    mov A,#digit_buf ;Load pointer to digit_buf array to A
+    >sub A,R3 ;A = digit_buf - R3
+    add A,#6 ;A = digit_buf - R3 + 6
+    mov R1,A ;Load properly positioned pointer to R1
+display_number_loop:
+    mov A,@R1
+    mov R0,A ;Load next digit to R0
+    call lcd_write ;R1 is not explicitly set to 1 because lcd_write will send data when R1>0, and R1 here is used as pointer to RAM, so it will always be >0
+    inc R1 ;Move pointer to next digit
+    mov A,R3
+    >sub A,R4 ; A = R3 - R4; determine if decimal point position has been reached already
+    jnz display_number_skip_dp ;If not, do not display it
+    mov R0,#'.'
+    call lcd_write ;Otherwise display it
+display_number_skip_dp:
+    djnz R3,display_number_loop
+    ret
+
 disp_bmp:
     mov R0,#0
     mov R1,#0
@@ -1141,23 +1204,29 @@ disp_bmp:
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     inc R1
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     mov R0,#'.'
     call lcd_write ;TODO no stupid trick with R1
     inc R1
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     inc R1
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     mov R0,#'C'
     call lcd_write ;TODO no stupid trick with R1
 
+    mov R3,#json2
+    call uart_string
 
     mov R0,#0
     mov R1,#1
@@ -1177,34 +1246,44 @@ disp_bmp:
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     inc R1
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     inc R1
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     inc R1
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     mov R0,#'.'
     call lcd_write ;TODO no stupid trick with R1
     inc R1
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     inc R1
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     mov R0,#'h'
     call lcd_write ;TODO no stupid trick with R1
     mov R0,#'P'
     call lcd_write ;TODO no stupid trick with R1
     mov R0,#'a'
     call lcd_write ;TODO no stupid trick with R1
+
+    mov R3,#json3
+    call uart_string
+
     ret
 
 disp_ds:
@@ -1223,22 +1302,29 @@ disp_ds:
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     inc R1
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     mov R0,#'.'
     call lcd_write ;TODO no stupid trick with R1
     inc R1
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     inc R1
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     mov R0,#'C'
     call lcd_write ;TODO no stupid trick with R1
+
+    mov R3,#json4
+    call uart_string
     ret
 
 disp_dht:
@@ -1260,63 +1346,45 @@ disp_loop:
     mov A,@R1
     mov R0,A
     call lcd_write ;TODO no stupid trick with R1
+    call uart_write_byte
     inc R1
     djnz R4,disp_loop
     mov R0,#'%'
     call lcd_write ;TODO no stupid trick with R1
+
+    mov R3,#json5
+    call uart_string
     ret
 
-; ;R0 - byte to send, uses R0,R6,R7
-; uart_write_byte:
-; 	mov R6,#8 ;Load bit counter	
-; 	mov A,R0 ;Move byte to be send to A	
-; 	anl P1,#~uart_tx_pin ;Set tx pin low - start bit
-; 	call delay_100us
-; uart_write_loop:
-; 	jb0 uart_write_one ;Check if LSB of A is set
-; 	anl P1,#~uart_tx_pin ;Set tx pin low
-; 	jmp uart_write_delay	
-; uart_write_one:
-; 	orl P1,#uart_tx_pin ;Set tx pin high
-; uart_write_delay:
-; 	call delay_100us
-; 	rr A ;Shift byte one bit right
-; 	djnz R6,uart_write_loop
+;R0 - byte to send, uses R0,R6,R7
+uart_write_byte:
+	mov R6,#8 ;Load bit counter	
+	mov A,R0 ;Move byte to be send to A	
+	anl P1,#~uart_tx_pin ;Set tx pin low - start bit
+	call delay_100us
+uart_write_loop:
+	jb0 uart_write_one ;Check if LSB of A is set
+	anl P1,#~uart_tx_pin ;Set tx pin low
+	jmp uart_write_delay	
+uart_write_one:
+	orl P1,#uart_tx_pin ;Set tx pin high
+uart_write_delay:
+	call delay_100us
+	rr A ;Shift byte one bit right
+	djnz R6,uart_write_loop
 
-; 	orl P1,#uart_tx_pin ;Set tx pin high - stop bit
-; 	call delay_100us
-; 	ret
+	orl P1,#uart_tx_pin ;Set tx pin high - stop bit
+	call delay_100us
+	ret
 
-; bmp280_display:
-;     mov R0,#13
-;     mov R1,#0
-;     call lcd_gotoxy
-
-;     mov R5,#bmp280_temp_real
-;     call split_32bit
-
-;     mov R4,#4
-;     mov R1,#ascii_num+2
-; bmp280_display_loop1:
-;     mov A,@R1
-;     mov R0,A
-;     call lcd_write ;TODO no stupid trick with R1
-;     inc R1
-;     djnz R4,bmp280_display_loop1
-
-;     mov R0,#10
-;     mov R1,#1
-;     call lcd_gotoxy
-
-;     mov R5,#bmp280_pres_real
-;     call split_32bit
-
-;     mov R4,#6
-;     mov R1,#ascii_num
-; bmp280_display_loop2:
-;     mov A,@R1
-;     mov R0,A
-;     call lcd_write ;TODO no stupid trick with R1
-;     inc R1
-;     djnz R4,bmp280_display_loop2
-;     ret
+delay_50s:
+    mov R5,#255
+delay_50s_loop1:
+    mov R6,#255
+delay_50s_loop2:
+    mov R7,#255
+delay_50s_loop3:
+    djnz R7,delay_50s_loop3
+    djnz R6,delay_50s_loop2
+    djnz R5,delay_50s_loop1
+    ret
