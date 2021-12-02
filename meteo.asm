@@ -59,7 +59,14 @@ bmp280_pres_real    .eq $58 ;32-bit
 dht11_humid         .eq $5C ;8-bit
 ds18b20_temp_raw    .eq $5D ;16-bit
 
-digit_buf .eq $5F ;6 bytes
+digit_buf   .eq $5F ;6 bytes
+
+second_cntr .eq $65
+
+;Constants
+hardware_timer_init_val .eq 48 ;Gives ~100Hz interrupt rate @10MHz
+second_cntr_init_val    .eq 156 ;Divide-by-100 counter
+; hour_cntr_init_val      .eq 196 ;2 divide-by-60 counters cascaded = divide-by-3600 counter
 
 ;======================== Macros ========================
 swap    .ma Rx,Ry ;Swaps two registers
@@ -83,21 +90,64 @@ sub     .ma A,V ;Subtracts V (Rx or immediate value) from A (A = A - V)
 	.no $00 ;Set jump to main at reset vector (00h)
 	jmp main
 
+    .no $07 ;Set jump to timer ISR at timer interrupt vector (07h)
+	jmp timer_isr
+
 ;======================== Main ========================
 main:
-    ; mov R3,#wifi
-    ; call uart_string
     call lcd_init
-    call display_layout
     call bmp280_write_config
     call bmp280_read_cal_regs
+    ; nop
+    call timers_init
+    clr F1 ;DEBUG!!!
 loop:
-    call read_sensors
-    call update_display
+    jf1 loop ;Loop until second counter sets flag
 
+    call bmp280_read_meas
+    call bmp280_compute
+    call bmp280_display
+    ;call bmp280_write_uart
+
+    call dht11_read_rh
+    call dht11_display
+    ;call dht11_write_uart
+    
+    call ds18b20_read_temp
+    call ds18b20_display
+    ;call ds18b20_write_uart
+    
+    mov R6,#250
+    call delay_ms
    
-   
+    clr F1
+    cpl F1 ;Clear interrupt flag
 	jmp loop
+
+;======================== Delay routines ========================
+
+;~100uS delay, uses and corrupts R7
+delay_100us:
+	mov R7,#28
+delay_100us_loop:
+	djnz R7,delay_100us_loop
+	ret
+
+;~500uS delay, uses and corrupts R7
+delay_500us:
+	mov R7,#164
+delay_500us_loop:
+	djnz R7,delay_500us_loop
+	ret
+   
+;R6 - delay time in msec, uses and corrupts R6,R7
+delay_ms:
+	mov R7,#228
+delay_ms_loop:
+	nop
+	djnz R7,delay_ms_loop
+	djnz R6,delay_ms
+	ret 
 
 ;======================== 32-bit math routines ========================
 ;R0 - pointer to value to be zeroed, uses and corrupts R0,R6
@@ -335,7 +385,7 @@ read_cal_loop:
     ret
 
 ;Uses and corrupts F0 and ALL registers
-bmp280_read_raw_meas:
+bmp280_read_meas:
     mov R0,#bmp280_pres_raw
     call zero_32bit ;Clear bmp280_pres_raw
     mov R0,#bmp280_temp_raw
@@ -416,7 +466,7 @@ bmp280_merge_reg:
     ret
 
 ;Uses and corrupts F0 and ALL registers 
-bmp280_compute_values:
+bmp280_compute:
     ;============ Temperature compensation ============
     mov R0,#tmp1
     mov R1,#bmp280_temp_raw
@@ -804,6 +854,35 @@ bmp280_compute_continue:
     call add_32bit ; bmp280_pres_real = bmp280_pres_real + tmp2
     ret
 
+;TODO add uses
+bmp280_display:
+    mov R1,#0
+    mov R0,#0
+    call lcd_gotoxy
+    mov R3,#temp_in_string
+    call lcd_string
+    mov R5,#bmp280_temp_real
+    call split_32bit
+    mov R3,#4
+    mov R4,#2
+    call lcd_num
+    mov R3,#deg_c_string
+    call lcd_string
+
+    mov R1,#1
+    mov R0,#0
+    call lcd_gotoxy
+    mov R3,#pressure_string
+    call lcd_string
+    mov R5,#bmp280_pres_real
+    call split_32bit
+    mov R3,#6
+    mov R4,#2
+    call lcd_num
+    mov R3,#hpa_string
+    call lcd_string
+    ret
+
 ;======================== DHT11 routines ========================
 ;R0 - value of RH in percent, uses and corrupts R0,R6,R7 TODO write value to RAM
 dht11_read_rh:
@@ -839,22 +918,38 @@ dht11_read_rh_continue:
     mov @R1,A ;Store read value in dht11_humid
     ret
 
-;TODO uses
+;TODO uses, why no flags
 dht11_value_to_digits:
     mov R0,#tmp1
     mov R1,#dht11_humid
     mov R7,#1
-    call copy_32bit
+    call copy_32bit ;tmp1 = TODO
 
     mov R5,#tmp1
     call split_32bit ;Split value to digits
     ret
 
+;TODO uses, comments
+dht11_display:
+    mov R1,#1
+    mov R0,#13
+    call lcd_gotoxy
+    mov R3,#humidity_string
+    call lcd_string
+    call dht11_value_to_digits
+    mov R3,#2
+    mov R4,#0
+    call lcd_num
+    mov R0,#'%'
+    mov R1,#1
+    call lcd_write
+    ret
+
 ;======================== DS18b20 routines ========================
 ;Uses R0,R1,R2,R3,R6,R7 TODO add uses
 ds18b20_read_temp:
-    clr F1
-    cpl F1 ;Set F0
+    clr F0
+    cpl F0 ;Set F0
 	call ow_reset ;Send bus reset condition
 	mov R0,#ds18b20_skip_rom 
 	call ow_write_byte ;Send skip ROM command
@@ -868,7 +963,7 @@ ds18b20_read_temp:
     jb7 ds18b20_read_temp_neg ;If value negative, compute two's complement
     jmp ds18b20_read_temp_pos ;If value positive, just store in RAM
 ds18b20_read_temp_neg:
-    clr F1 ;Clear F1 to report that value was negative
+    clr F0 ;Clear F1 to report that value was negative
     cpl A 
     mov R3,A ;R3 = ~MSB
     mov A,R2
@@ -911,161 +1006,27 @@ ds18b20_value_to_digits:
     mov R6,#2
     call shr_32bit ;tmp2 = (ds18b20_temp_raw*25)>>2 = ds18b20_temp_raw*(25/4)
     call split_32bit
-
-    mov R0,#digit_buf+1
-    mov @R0,#'+'
-    jf1 ds18b20_value_to_digits_end ;If value is not negative, finish
-    mov @R0,#'-'
-ds18b20_value_to_digits_end:  
     ret
 
-;R3 - number of digits to display, R4 - decimal point position from end of number
-display_number:
-    mov R0,#digit_buf
-    mov A,@R0
-    >sub A,#'-'
-    jnz display_positive
-    mov R0,#'-'
-    mov R1,#1
-    call lcd_write
-display_positive:
-    mov A,#digit_buf
-    add A,#6 ;A = digit_buf + 6
-    >sub A,R3 ;A = digit_buf + 6 - R3
-    mov R1,A ;Load properly positioned pointer to R1
-display_number_loop:
-    mov A,R3
-    >sub A,R4 ; A = R3 - R4; determine if decimal point position has been reached already
-    jnz display_number_skip_dp ;If not, do not display it
-    mov R0,#'.'
-    call lcd_write ;Otherwise display it
-display_number_skip_dp:
-    mov A,@R1
-    mov R0,A ;Load next digit to R0
-    call lcd_write ;R1 is not explicitly set to 1 because lcd_write will send data when R1>0, and R1 here is used as pointer to RAM, so it will always be >0
-    inc R1 ;Move pointer to next digit
-    djnz R3,display_number_loop
-    ret
-
-display_layout:
-    mov R0,#'I'
-    mov R1,#1
-    call lcd_write
-    mov R0,#':'
-    call lcd_write
+;TODO comments
+ds18b20_display:
     mov R1,#0
     mov R0,#10
     call lcd_gotoxy
-    mov R0,#'O'
+    mov R3,#temp_out_string
+    call lcd_string
+    jf0 ds18b20_display_pos
+    mov R0,#'-'
     mov R1,#1
     call lcd_write
-    mov R0,#':'
-    call lcd_write
-    mov R1,#1
-    mov R0,#0
-    call lcd_gotoxy
-    mov R0,#'P'
-    mov R1,#1
-    call lcd_write
-    mov R0,#':'
-    call lcd_write
-    mov R1,#1
-    mov R0,#14
-    call lcd_gotoxy
-    mov R0,#'H'
-    mov R1,#1
-    call lcd_write
-    mov R0,#':'
-    call lcd_write
-    mov R1,#1
-    mov R0,#19
-    call lcd_gotoxy
-    mov R0,#'%'
-    mov R1,#1
-    call lcd_write
+ds18b20_display_pos:
+    call ds18b20_value_to_digits
+    mov R3,#4
+    mov R4,#2
+    call lcd_num
+    mov R3,#deg_c_string
+    call lcd_string
     ret
-
-;======================== Delay routines ========================
-
-;~100uS delay, uses and corrupts R7
-delay_100us:
-	mov R7,#28
-delay_100us_loop:
-	djnz R7,delay_100us_loop
-	ret
-
-;~500uS delay, uses and corrupts R7
-delay_500us:
-	mov R7,#164
-delay_500us_loop:
-	djnz R7,delay_500us_loop
-	ret
-   
-;R6 - delay time in msec, uses and corrupts R6,R7
-delay_ms:
-	mov R7,#228
-delay_ms_loop:
-	nop
-	djnz R7,delay_ms_loop
-	djnz R6,delay_ms
-	ret 
-
-;R0 - byte to send, uses R0,R6,R7
-uart_write_byte:
-	mov R6,#8 ;Load bit counter	
-	mov A,R0 ;Move byte to be send to A	
-	anl P1,#~uart_tx_pin ;Set tx pin low - start bit
-	call delay_100us
-uart_write_loop:
-	jb0 uart_write_one ;Check if LSB of A is set
-	anl P1,#~uart_tx_pin ;Set tx pin low
-	jmp uart_write_delay	
-uart_write_one:
-	orl P1,#uart_tx_pin ;Set tx pin high
-uart_write_delay:
-	call delay_100us
-	rr A ;Shift byte one bit right
-	djnz R6,uart_write_loop
-
-	orl P1,#uart_tx_pin ;Set tx pin high - stop bit
-	call delay_100us
-	ret
-
-; delay_50s:
-;     mov R5,#255
-; delay_50s_loop1:
-;     mov R6,#255
-; delay_50s_loop2:
-;     mov R7,#255
-; delay_50s_loop3:
-;     djnz R7,delay_50s_loop3
-;     djnz R6,delay_50s_loop2
-;     djnz R5,delay_50s_loop1
-;     ret
-
-;           .ot
-; wifi        .az /AT+CWJAP_CUR="xxxxx","xxxxx"/,#$0D,#$0A
-; tcp_start   .az /AT+CIPSTART="TCP","192.168.8.69",3000/,#$0D,#$0A
-; tcp_send    .az /AT+CIPSEND=135/,#$0D,#$0A
-; post        .az /POST /,#$2F,/ HTTP/,#$2F,/1.1/,#$0D,#$0A,/Content-Length: 62/,#$0D,#$0A,/Content-Type: application/,#$2F,/json/,#$0D,#$0A,#$0D,#$0A
-; json1       .az /{"name":"MCS48","ti":"/
-; json2       .az /","p":"/
-; json3       .az /","to":"/
-; json4       .az /","h":"/
-; json5       .az /"}/,#$0D,#$0A
-
-;     ;R3 - pointer to string in ROM
-; uart_string:
-;     mov A,R3 ;Load string pointer to A
-;     movp A,@A ;Load char from ROM to A
-;     .ct
-;     jz uart_string_end ;If end of the string - finish
-;     mov R0,A ;Load A to R0
-;     call uart_write_byte ;Send char
-;     inc R3 ;Move pointer to next char
-;     jmp uart_string ;Loop until end of the string
-; uart_string_end:
-;     ret
 
 ;======================== I2C routines ========================	
 ;No registers used
@@ -1190,6 +1151,27 @@ ow_write_zero:
 	djnz R1,ow_write_loop ;Write next bit; ~3us
 	ret
 
+;R0 - byte to send, uses R0,R6,R7
+uart_write_byte:
+	mov R6,#8 ;Load bit counter	
+	mov A,R0 ;Move byte to be send to A	
+	anl P1,#~uart_tx_pin ;Set tx pin low - start bit
+	call delay_100us
+uart_write_loop:
+	jb0 uart_write_one ;Check if LSB of A is set
+	anl P1,#~uart_tx_pin ;Set tx pin low
+	jmp uart_write_delay	
+uart_write_one:
+	orl P1,#uart_tx_pin ;Set tx pin high
+uart_write_delay:
+	call delay_100us
+	rr A ;Shift byte one bit right
+	djnz R6,uart_write_loop
+
+	orl P1,#uart_tx_pin ;Set tx pin high - stop bit
+	call delay_100us
+	ret
+
 ;======================== LCD routines ========================
 ;R0 - byte, R1 - cmd/data switch, uses R0,R1, corrupts nothing
 lcd_write:
@@ -1263,61 +1245,104 @@ lcd_init:
 	call lcd_cls ;Clear screen
 	ret
 
-read_sensors:
-    call bmp280_read_raw_meas
-    call bmp280_compute_values
-    call ds18b20_read_temp
-    call dht11_read_rh
+;R3 - number of digits to display, R4 - decimal point position from end of number
+lcd_num: ;TODO add trailing zeros removal
+    mov A,#digit_buf
+    add A,#6 ;A = digit_buf + 6
+    >sub A,R3 ;A = digit_buf + 6 - R3
+    mov R1,A ;Load properly positioned pointer to R1
+    mov A,@R1 ;Load first digit to be displayed to A
+    >sub A,#$30 ;A = A - 0x30 = A - '0'; check if first digit is '0'
+    jnz lcd_num_loop ;If first digit is not '0', proceed to loop
+    inc R1 ;Otherwise blank that zero - select next digit from buffer
+    dec R3 ;Decrement number of digits to display
+lcd_num_loop:
+    mov A,R3
+    >sub A,R4 ; A = R3 - R4; determine if decimal point position has been reached already
+    jnz lcd_num_skip_dp ;If not, do not display it
+    mov R0,#'.' ;Otherwise display it 
+    call lcd_write ;R1 is not explicitly set to 1 because lcd_write will send data when R1>0, and R1 here is used as pointer to RAM, so it will always be >0
+lcd_num_skip_dp:
+    mov A,@R1
+    mov R0,A ;Load next digit to R0
+    call lcd_write ;R1 not set for the same reason as above
+    inc R1 ;Move pointer to next digit
+    djnz R3,lcd_num_loop
     ret
 
-update_display:
-    mov R1,#0
-    mov R0,#13
-    call lcd_gotoxy
-    call ds18b20_value_to_digits
-    mov R3,#4
-    mov R4,#2
-    call display_number
-    mov R0,#'C'
-    mov R1,#1
-    call lcd_write
+    .ot
+pressure_string .az /P:/
+temp_in_string  .az /I:/
+temp_out_string .az /O:/
+humidity_string .az /H:/
+hpa_string      .az /hPa/
+deg_c_string    .az #$DF,/C /
 
-    mov R1,#1
-    mov R0,#17
-    call lcd_gotoxy
-    call dht11_value_to_digits
-    mov R3,#2
-    mov R4,#0
-    call display_number
-
-    mov R1,#0
-    mov R0,#3
-    call lcd_gotoxy
-    mov R5,#bmp280_temp_real
-    call split_32bit
-    mov R3,#4
-    mov R4,#2
-    call display_number
-    mov R0,#'C'
-    mov R1,#1
-    call lcd_write
-
-    mov R1,#1
-    mov R0,#3
-    call lcd_gotoxy
-    mov R5,#bmp280_pres_real
-    call split_32bit
-    mov R3,#6
-    mov R4,#2
-    call display_number
-    mov R1,#1
-    mov R0,#'h'
-    call lcd_write
-    mov R0,#'P'
-    call lcd_write
-    mov R0,#'a'
-    call lcd_write
-
-    mov R6,#250
-    call delay_ms
+;R3 - pointer to string in ROM
+lcd_string:
+    mov R1,#1 ;Send data to LCD
+lcd_string_loop:
+    mov A,R3 ;Load string pointer to A
+    movp A,@A ;Load char from ROM to A
+    .ct ;TODO
+    jz lcd_string_end ;If end of the string - finish
+    mov R0,A ;Load A to R0
+    call lcd_write ;Send char
+    inc R3 ;Move pointer to next char
+    jmp lcd_string_loop ;Loop until end of the string
+lcd_string_end:
     ret
+
+timers_init:
+    mov A,#hardware_timer_init_val
+    mov T,A ;Load hardware timer
+    mov R0,#second_cntr
+    mov A,#second_cntr_init_val
+    mov @R0,A ;Load second counter
+    en tcnti ;Enable timer/counter interrupt
+    strt T ;Start hardware timer
+    ret
+
+timer_isr:
+    sel RB1
+    mov R7,A
+    mov R0,#second_cntr
+    inc @R0 ;Increment second counter
+    mov A,@R0
+    jnz timer_no_overflow ;Check if counter overflown
+    in A,P1
+    xrl A,#1
+    outl P1,A ;DEBUG!!!
+    clr F1 ;Set second interrupt flag
+    mov A,#second_cntr_init_val
+    mov @R0,A ;Reload second coumnter
+timer_no_overflow:
+    mov A,#hardware_timer_init_val
+    mov T,A ;Reload timer
+    mov A,R7
+    sel RB0
+    retr
+
+    ;           .ot
+; wifi        .az /AT+CWJAP_CUR="xxxxx","xxxxx"/,#$0D,#$0A
+; tcp_start   .az /AT+CIPSTART="TCP","192.168.8.69",3000/,#$0D,#$0A
+; tcp_send    .az /AT+CIPSEND=135/,#$0D,#$0A
+; post        .az /POST /,#$2F,/ HTTP/,#$2F,/1.1/,#$0D,#$0A,/Content-Length: 62/,#$0D,#$0A,/Content-Type: application/,#$2F,/json/,#$0D,#$0A,#$0D,#$0A
+; json1       .az /{"name":"MCS48","ti":"/
+; json2       .az /","p":"/
+; json3       .az /","to":"/
+; json4       .az /","h":"/
+; json5       .az /"}/,#$0D,#$0A
+
+;     ;R3 - pointer to string in ROM
+; uart_string:
+;     mov A,R3 ;Load string pointer to A
+;     movp A,@A ;Load char from ROM to A
+;     .ct
+;     jz uart_string_end ;If end of the string - finish
+;     mov R0,A ;Load A to R0
+;     call uart_write_byte ;Send char
+;     inc R3 ;Move pointer to next char
+;     jmp uart_string ;Loop until end of the string
+; uart_string_end:
+;     ret
