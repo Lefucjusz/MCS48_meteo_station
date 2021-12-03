@@ -3,8 +3,6 @@
 ;TODO add uses/corrupts
 ;TODO check if result variables passed to mul are not double-zeroed
 ;TODO optimize register loads
-;TODO check for sign in zero blanking
-;TODO pass digit number to split_32bit
 	.cr	8048
 	.tf	rom.bin,BIN
 	.lf	meteo.lst
@@ -60,13 +58,13 @@ tmp_buf_ascii       .eq $54 ;6 bytes ;TODO explain why such weird idea
 bmp280_temp_ascii   .eq $5A ;4 bytes
 bmp280_pres_ascii   .eq $5E ;6 bytes
 dht11_rh_ascii      .eq $64 ;2 bytes
-ds18b20_temp_ascii  .eq $66 ;4 bytes
+ds18b20_temp_ascii  .eq $66 ;5 bytes
 
-hr_cntr_1   .eq $6A ;8-bit
-hr_cntr_2   .eq $6B ;8-bit
+hr_cntr_1   .eq $6B ;8-bit
+hr_cntr_2   .eq $6C ;8-bit
 
 ;Constants
-hr_cntr_overflow_val    .eq 2 ;2 divide-by-60 counters cascaded = divide-by-3600 counter TODO DEBUG
+hr_cntr_overflow_val    .eq 60 ;2 divide-by-60 counters cascaded = divide-by-3600 counter
 
 ;======================== Macros ========================
 swap    .ma Rx,Ry ;Swaps two registers
@@ -93,164 +91,129 @@ sub     .ma A,V ;Subtracts V (Rx or immediate value) from A (A = A - V)
 ;======================== Main ========================
 main:
     call lcd_init ;Initialize LCD
-    ; call hr_cntr_clear ;Clear hour counter
+    call hr_cntr_clear ;Clear hour counter
     call bmp280_write_config ;Configure BMP280
     call bmp280_read_cal_regs ;Read BMP280 calibration registers
-    call bmp280_read_meas
-    call bmp280_compute
-    mov R1,#bmp280_temp_ascii
-    mov R2,#4
-    mov R3,#2
-    call lcd_num
 loop:
-    ; call bmp280_read_meas
-    ; call bmp280_compute
-    ; mov R1,#bmp280_temp_ascii
-    ; mov R2,#4
-    ; mov R3,#2
-    ; call lcd_num
-    ; call dht11_read_rh
-    ; call ds18b20_read_temp
-
-    ; ; call display_meas ;Display measurements
-    ; mov R6,#250
-    ; call delay_ms
-    ; mov R6,#250
-    ; call delay_ms
-    ; mov R6,#141
-    ; call delay_ms ;Delays tuned to give display update ~1s
-    ; ; call update_hr_cntr ;Update hour counter
-    ; ; jf0 loop ;If less than hour since last measurements sending to server, don't send
-    ; ; call send_meas ;Otherwise send data to server
-    ; clr F0
-    ; cpl F0 ;Clear hour flag
+    call perform_meas
+    call display_meas
+    call update_hr_cntr ;Update hour counter
+    jf0 skip_meas_send ;If less than hour since last measurements sending to server, don't send
+    call send_meas
+skip_meas_send:
+    mov R6,#250
+    call delay_ms
+    mov R6,#250
+    call delay_ms
+    mov R6,#141
+    call delay_ms ;Delays tuned to give display update ~1s
+    clr F0
+    cpl F0 ;Clear hour flag
 	jmp loop
 
-;     .ot
+
+   .ot
 esp_conn_start  .az /AT+CIPSTART="TCP","192.168.8.69",3000/,#$0D,#$0A
-esp_req_send    .az /AT+CIPSEND=136/,#$0D,#$0A
-esp_req_part_1  .az /POST /,#$2F,/ HTTP/,#$2F,/1.1/,#$0D,#$0A,/Content-Length: 63/,#$0D,#$0A,/Content-Type: application/,#$2F,/json/,#$0D,#$0A,#$0D,#$0A,/{"name":"MCS48","ti":"/
-; esp_req_part_2  .az /","p":"/
-; esp_req_part_3  .az /","to":"/
-; esp_req_part_4  .az /","h":"/
-; esp_req_end     .az /"}/,#$0D,#$0A
+esp_req_send    .az /AT+CIPSEND=152/,#$0D,#$0A
+esp_req_part_1  .az /POST /,#$2F,/api/,#$2F,/sensors/,#$2F,/full /,/HTTP/,#$2F,/1.1/,#$0D,#$0A,/Content-Length: 64/,#$0D,#$0A,/Content-Type: application/,#$2F,/json/,#$0D,#$0A,#$0D,#$0A,/{"name":"MCS48","Ti":"/
+esp_req_part_2  .az /","To":"/
+esp_req_part_3  .az /","P":"/
+esp_req_part_4  .az /","RH":"/
+esp_req_end     .az /"}/,#$0D,#$0A
 
+;R3 - pointer to string in ROM
+uart_string:
+    mov A,R3 ;Load string pointer to A
+    movp A,@A ;Load char from ROM to A
+    .ct
+    jz uart_string_end ;If end of the string - finish
+    mov R0,A ;Load A to R0
+    call uart_write_byte ;Send char
+    inc R3 ;Move pointer to next char
+    jmp uart_string ;Loop until end of the string
+uart_string_end:
+    ret
 
-; ;R3 - pointer to string in ROM
-; uart_string:
-;     mov A,R3 ;Load string pointer to A
-;     movp A,@A ;Load char from ROM to A
-;     .ct
-;     jz uart_string_end ;If end of the string - finish
-;     mov R0,A ;Load A to R0
-;     call uart_write_byte ;Send char
-;     inc R3 ;Move pointer to next char
-;     jmp uart_string ;Loop until end of the string
-; uart_string_end:
-;     ret
+;R1 - pointer to buffer with digits, R2 - number of digits to send
+uart_num:
+    mov A,@R1
+    mov R0,A ;Load next digit to R0
+    call uart_write_byte
+    inc R1 ;Move pointer to next digit
+    djnz R2,uart_num
+    ret
 
-; ;R0 - byte to send, uses R0,R6,R7
-; uart_write_byte:
-; 	mov R6,#8 ;Load bit counter	
-; 	mov A,R0 ;Move byte to be send to A	
-; 	anl P1,#~uart_tx_pin ;Set tx pin low - start bit
-; 	call delay_100us
-; uart_write_loop:
-; 	jb0 uart_write_one ;Check if LSB of A is set
-; 	anl P1,#~uart_tx_pin ;Set tx pin low
-; 	jmp uart_write_delay	
-; uart_write_one:
-; 	orl P1,#uart_tx_pin ;Set tx pin high
-; uart_write_delay:
-; 	call delay_100us
-; 	rr A ;Shift byte one bit right
-; 	djnz R6,uart_write_loop
+; R0 - byte to send, uses R0,R6,R7
+uart_write_byte:
+	mov R6,#8 ;Load bit counter	
+	mov A,R0 ;Move byte to be send to A	
+	anl P1,#~uart_tx_pin ;Set tx pin low - start bit
+	call delay_100us
+uart_write_loop:
+	jb0 uart_write_one ;Check if LSB of A is set
+	anl P1,#~uart_tx_pin ;Set tx pin low
+	jmp uart_write_delay	
+uart_write_one:
+	orl P1,#uart_tx_pin ;Set tx pin high
+uart_write_delay:
+	call delay_100us
+	rr A ;Shift byte one bit right
+	djnz R6,uart_write_loop
 
-; 	orl P1,#uart_tx_pin ;Set tx pin high - stop bit
-; 	call delay_100us
-; 	ret
+	orl P1,#uart_tx_pin ;Set tx pin high - stop bit
+	call delay_100us
+	ret
 
-; ;R1 - pointer to buffer with digits, R2 - number of digits to send TODO comments
-; uart_num:
-;     mov A,R1
-;     add A,#6 ;A = R1 + 6
-;     >sub A,R3 ;A = R1 + 6 - R3
-;     mov R1,A ;Load properly positioned pointer to R1
-; uart_num_loop:
-;     mov A,@R1
-;     mov R0,A ;Load next digit to R0
-;     call uart_write_byte
-;     inc R1 ;Move pointer to next digit
-;     djnz R2,uart_num_loop
-;     ret
+;======================== Delay routines ========================
 
-; display_meas:
-;     call bmp280_read_meas
-;     call bmp280_compute
-;     call bmp280_display
+;~100uS delay, uses and corrupts R7
+delay_100us:
+	mov R7,#28
+delay_100us_loop:
+	djnz R7,delay_100us_loop
+	ret
 
-;     call dht11_read_rh
-;     call dht11_display
-    
-;     call ds18b20_read_temp
-;     call ds18b20_display
-;     ret
+;~500uS delay, uses and corrupts R7
+delay_500us:
+	mov R7,#164
+delay_500us_loop:
+	djnz R7,delay_500us_loop
+	ret
+   
+;R6 - delay time in msec, uses and corrupts R6,R7
+delay_ms:
+	mov R7,#228
+delay_ms_loop:
+	nop
+	djnz R7,delay_ms_loop
+	djnz R6,delay_ms
+	ret
 
-; send_meas:
-;     mov R3,#esp_conn_start
-;     call uart_string ;Send AT command to start connection
-;     mov R6,#100
-;     call delay_ms ;Wait for ESP to be ready TODO tune timings
-;     mov R3,#esp_req_send
-;     call uart_string ;Send AT command to request sending data
-;     mov R6,#100
-;     call delay_ms ;Wait for ESP to be ready TODO tune timings
-    
-;     mov R3,#esp_req_part_1
-;     call uart_string ;Send first part of request
-;     call bmp280_read_meas
-;     call bmp280_compute
-;     mov R5,#bmp280_temp_real
-;     call split_32bit
-;     mov R3,#4
-;     call uart_num
+;TODO DESCRIPTION
+hr_cntr_clear: ;TODO comments
+    clr A
+    mov R0,#hr_cntr_1
+    mov @R0,A
+    mov R0,#hr_cntr_2
+    mov @R0,A
+    ret
 
-;     mov R3,#esp_req_part_2
-;     call uart_string ;Send first part of request
-;     mov R5,#bmp280_pres_real
-;     call split_32bit
-;     mov R3,#6
-;     call uart_num
-
-;     mov R3,#esp_req_part_3
-;     call uart_string ;Send first part of request
-;     call ds18b20_read_temp
-;     jf0 send_meas_temp_pos
-;     mov R0,#'-'
-;     jmp send_meas_temp_neg
-; send_meas_temp_pos:
-;     mov R0,#' '
-; send_meas_temp_neg:
-;     call uart_write_byte
-;     mov R5,#ds18b20_temp_raw
-;     call split_32bit
-;     mov R3,#4
-;     call uart_num
-
-;     mov R3,#esp_req_part_4
-;     call uart_string ;Send first part of request
-;     call dht11_read_rh
-;     mov R5,#dht11_humid ;TODO rh or humid
-;     call split_32bit
-;     mov R3,#2
-;     call uart_num
-
-;     mov R3,#esp_req_end
-;     call uart_string
-
-;     ret
-
-
+update_hr_cntr:
+    mov R0,#hr_cntr_1 ;Load first counter address to R0
+    inc @R0 ;Increment counter value
+    mov A,@R0 ;Load counter value to A
+    >sub A,#hr_cntr_overflow_val
+    jnz hr_cntr_no_overflow ;Check if first counter overflown
+    mov @R0,A ;If overflown, clear it (A = 0 now, so just load it to the counter)
+    mov R0,#hr_cntr_2 ;Load second counter address to R0
+    inc @R0 ;Increment counter value
+    mov A,@R0 ;Load counter value to A
+    >sub A,#hr_cntr_overflow_val
+    jnz hr_cntr_no_overflow ;Check if second counter overflown
+    mov @R0,A ;If overflown, clear it (A = 0 now, so just load it to the counter)
+    clr F0 ;Set hour flag
+hr_cntr_no_overflow:
+    ret
 
 ;======================== I2C routines ========================	
 ;No registers used
@@ -581,27 +544,27 @@ bmp280_compute:
     call copy_mem ;tmp4 = tmp3, this value is needed during pressure compensation (t_fine, see BMP280 datasheet) so preserve it
     ; mov R0,#tmp1
     ; call zero_mem ;last time tmp1 was used as argument to mul_32bit, so it's already zeroed
-    mov R0,#tmp1
-    mov @R0,#5 ;tmp1 = 5
-    mov R3,#tmp2
+    mov R0,#tmp2
+    mov @R0,#5 ;tmp2 = 5
+    mov R3,#tmp1
     mov R4,#tmp3
-    mov R5,#tmp1
-    call mul_32bit ;tmp2 = t_fine * 5
+    mov R5,#tmp2
+    call mul_32bit ;tmp1 = t_fine * 5
     ; mov R0,#tmp1
     ; call zero_mem ;last time tmp1 was used as argument to mul_32bit, so it's already zeroed
-    mov R0,#tmp1
-    mov @R0,#128 ;tmp1 = 128
     mov R0,#tmp2
-    mov R1,#tmp1
-    call add_32bit ;tmp2 = t_fine * 5 + 128
+    mov @R0,#128 ;tmp2 = 128
+    mov R0,#tmp1
+    mov R1,#tmp2
+    call add_32bit ;tmp1 = t_fine * 5 + 128
     clr F0 ;Perform signed shift, clear flag after mul_32bit has set it 
-    mov R5,#tmp2
+    mov R5,#tmp1
     mov R6,#8
-    call shr_32bit ;tmp2 = (t_fine * 5 + 128) >> 8
-    mov R5,#tmp2
+    call shr_32bit ;tmp1 = (t_fine * 5 + 128) >> 8
+    mov R5,#tmp1
     call split_32bit ;Split final temperature result into ASCII digits
     mov R0,#bmp280_temp_ascii
-    mov R1,#tmp_buf_ascii+2 ;Ignore 2 first digits, they will always be '0'
+    mov R1,#tmp_buf_ascii+2 ;Ignore first 2 digits, they will always be '0'
     mov R7,#4
     call copy_mem ;Copy 4 digits from tmp_buf_ascii+2 to bmp280_temp_ascii
     ;============ Pressure compensation ============
@@ -761,9 +724,9 @@ bmp280_compute:
     mov R1,#tmp1
     call sub_32bit ;tmp4 = tmp4 - 1 to check if tmp4 == 0
     jnc bmp280_compute_not_zero ;If carry not set, tmp4 != 0
-    mov R0,#tmp3
+    mov R0,#tmp5
     call zero_mem ;tmp3 = 0
-    mov R5,#tmp3
+    mov R5,#tmp5
     call split_32bit ;Split 0 to digits to fill tmp_buf_ascii with zeroes
     mov R0,#bmp280_pres_ascii
     mov R1,#tmp_buf_ascii
@@ -877,25 +840,25 @@ bmp280_compute_continue:
     mov R5,#tmp5
     mov R6,#13
     call shr_32bit ;tmp5 = ((tmp3>>2)*dig_P8)>>13
-    mov R0,#tmp2
-    mov R1,#tmp5
-    call add_32bit ;tmp2 = tmp2 + tmp5
+    mov R0,#tmp5
+    mov R1,#tmp2
+    call add_32bit ;tmp5 = tmp5 + tmp2
     ;Perform signed sign extension, flag already cleared
     mov R0,#tmp1
     mov R1,#dig_P7
     mov R7,#2
     call copy_mem ;Copy 2 bytes - tmp1 (32-bit) = dig_P7 (16-bit)
-    mov R0,#tmp2
+    mov R0,#tmp5
     mov R1,#tmp1
-    call add_32bit ;tmp2 = tmp2 + dig_P7
+    call add_32bit ;tmp5 = tmp5 + dig_P7
     ;Perform signed shift, flag already cleared
-    mov R5,#tmp2
+    mov R5,#tmp5
     mov R6,#4
-    call shr_32bit ;tmp2 = tmp2>>4
-    mov R0,#tmp3
-    mov R1,#tmp2
-    call add_32bit ; tmp3 = tmp3 + tmp2
-    mov R3,#tmp3
+    call shr_32bit ;tmp5 = tmp5>>4
+    mov R0,#tmp5
+    mov R1,#tmp3
+    call add_32bit ; tmp5 = tmp5 + tmp3
+    mov R3,#tmp5
     call split_32bit ;Split final pressure result into ASCII digits
     mov R0,#bmp280_pres_ascii
     mov R1,#tmp_buf_ascii
@@ -903,39 +866,10 @@ bmp280_compute_continue:
     call copy_mem ;Copy 6 digits from tmp_buf_ascii to bmp280_pres_ascii
     ret
 
-; ;TODO add uses
-; bmp280_display:
-;     mov R1,#0
-;     mov R0,#0
-;     call lcd_gotoxy
-;     mov R3,#temp_in_string
-;     call lcd_string
-;     mov R5,#bmp280_temp_real
-;     call split_32bit
-;     mov R3,#4
-;     mov R4,#2
-;     call lcd_num
-;     mov R3,#deg_c_string
-;     call lcd_string
-   
-;     mov R1,#1
-;     mov R0,#0
-;     call lcd_gotoxy
-;     mov R3,#pressure_string
-;     call lcd_string
-;     mov R5,#bmp280_pres_real
-;     call split_32bit
-;     mov R3,#6
-;     mov R4,#2
-;     call lcd_num
-;     mov R3,#hpa_string
-;     call lcd_string
-;     ret
-
 ;======================== DHT11 routines ========================
-;R0 - value of RH in percent, uses and corrupts R0,R6,R7 TODO write value to RAM
+;R1 - value of RH in percent, uses and corrupts R1,R6,R7
 dht11_read_rh:
-    mov R0,#0
+    mov R1,#0
     anl P1,#~dht11_pin
     mov R6,#20
     call delay_ms ;Pull DHT11 bus low for at least 18ms (20ms here to be sure)
@@ -944,9 +878,9 @@ dht11_read_rh:
     call delay_100us ;Wait for 200us - 40us + 80us + 80us, see datasheet; ignore sensor response
     mov R6,#8 ;Load loop counter
 dht11_read_rh_loop:
-    mov A,R0
+    mov A,R1
     rl A
-    mov R0,A ;R0 = R0<<1
+    mov R1,A ;R1 = R1<<1
     mov R7,#22 ;Load delay loop counter
 dht11_read_rh_delay:
     djnz R7,dht11_read_rh_delay ;Wait for ~70us
@@ -955,50 +889,31 @@ dht11_read_rh_delay:
     jnz dht11_read_one ;If '1' bit was received
     jmp dht11_read_rh_continue ; If '0' bit was received
 dht11_read_one:
-    inc R0 ;R0 = R0+1 (= R0|1)
+    inc R1 ;R1 = R1+1 (= R1|1)
 dht11_sync_loop:
     in A,P1 ;Load port state to A
     anl A,#dht11_pin ;Mask all pins except for DHT11 bus
     jnz dht11_sync_loop ;Self-synchronize timings - on every '1' bit received, wait for start-of-transmission bit
 dht11_read_rh_continue:
     djnz R6,dht11_read_rh_loop ;Repeat for all bits
-    ; mov R1,#dht11_humid ;TODO change to R0
-    ; mov A,R0
-    ; mov @R1,A ;Store read value in dht11_humid
+    mov R0,#tmp1
+    call zero_mem ;TODO zero_32bit everywhere, think about copy_mem name    
+    mov R0,#tmp1
+    mov A,R1
+    mov @R0,A ;Store read value in tmp1
+    mov R5,#tmp1
+    call split_32bit ;Split into ASCII digits
+    mov R0,#dht11_rh_ascii
+    mov R1,#tmp_buf_ascii+4 ;Ignore first 4 digits, they will always be '0'
+    mov R7,#2
+    call copy_mem ;Copy 2 digits from tmp_buf_ascii to dht11_rh_ascii
     ret
-
-; ;TODO uses, why no flags
-; dht11_value_to_digits:
-;     mov R0,#tmp1
-;     mov R1,#dht11_humid
-;     mov R7,#1
-;     call copy_mem ;tmp1 = TODO
-
-;     mov R5,#tmp1
-;     call split_32bit ;Split value to digits
-;     ret
-
-; ;TODO uses, comments
-; dht11_display:
-;     mov R1,#1
-;     mov R0,#13
-;     call lcd_gotoxy
-;     mov R3,#humidity_string
-;     call lcd_string
-;     call dht11_value_to_digits
-;     mov R3,#2
-;     mov R4,#0
-;     call lcd_num
-;     mov R0,#'%'
-;     mov R1,#1
-;     call lcd_write
-;     ret
 
 ;======================== DS18b20 routines ========================
 ;Uses R0,R1,R2,R3,R6,R7 TODO add uses
 ds18b20_read_temp:
-    clr F0
-    cpl F0 ;Set F0
+    clr F1
+    cpl F1 ;Clear sign flag
 	call ow_reset ;Send bus reset condition
 	mov R0,#ds18b20_skip_rom 
 	call ow_write_byte ;Send skip ROM command
@@ -1012,7 +927,7 @@ ds18b20_read_temp:
     jb7 ds18b20_read_temp_neg ;If value negative, compute two's complement
     jmp ds18b20_read_temp_pos ;If value positive, just store in RAM
 ds18b20_read_temp_neg:
-    clr F0 ;Clear F0 to report that value was negative
+    clr F1 ;Set sign flag
     cpl A 
     mov R3,A ;R3 = ~MSB
     mov A,R2
@@ -1020,63 +935,41 @@ ds18b20_read_temp_neg:
     inc A
     mov R2,A ;R2 = ~LSB+1
 ds18b20_read_temp_pos:
-    ; mov R0,#ds18b20_temp_raw
+    mov R0,#tmp2
+    call zero_mem
+    mov R0,#tmp2
     mov A,R2
-    mov @R0,A ;Store LSB in first byte of ds18b20_temp_raw
-    ; mov R0,#ds18b20_temp_raw+1
+    mov @R0,A ;Store LSB in first byte of tmp1
+    inc R0
     mov A,R3
-    mov @R0,A ;Store MSB in second byte of ds18b20_temp_raw
+    mov @R0,A ;Store MSB in second byte of tmp1
+    mov R0,#tmp3
+    call zero_mem ;Clear tmp3
+    mov R0,#tmp3
+    mov @R0,#$19 ;tmp3 = 0x19 = 25
+    mov R3,#tmp1
+    mov R4,#tmp2
+    mov R5,#tmp3
+    call mul_32bit ;tmp1 = tmp2*tmp3 = tmp2*25
+    mov R5,#tmp1
+    mov R6,#2
+    call shr_32bit ;tmp1 = (tmp2*25)>>2 = tmp2*(25/4)
+    call split_32bit ;Split into ASCII digits
+    mov R0,#ds18b20_temp_ascii
+    mov R1,#tmp_buf_ascii+1 ;Ignore first digit, two first will always be '0', but second one has to be copied for constant JSON length
+    mov R7,#5
+    call copy_mem ;Copy 5 digits from tmp_buf_ascii to ds18b20_temp_ascii
+    jf1 ds18b20_no_neg_sign ;If sign flag not set, do not append '-' sign
+    mov R0,#ds18b20_temp_ascii
+    mov A,#'-'
+    mov @R0,A ;Otherwise append '-' sign
+ds18b20_no_neg_sign:
 	call ow_reset ;Send bus reset condition
 	mov R0,#ds18b20_skip_rom ;Skip ROM
 	call ow_write_byte
 	mov R0,#ds18b20_convert_t ;Convert temp - prepare to read next time
 	call ow_write_byte
 	ret	
-
-;TODO add uses, add negative numbers support
-; ds18b20_value_to_digits:
-;     mov R0,#tmp2
-;     mov R1,#ds18b20_temp_raw
-;     mov R7,#2
-;     call copy_mem ;Copy 2 bytes
-
-;     mov R0,#tmp3
-;     call zero_mem ;Clear tmp3
-
-;     mov R0,#tmp3
-;     mov @R0,#$19 ;tmp1 = 0x19 = 25
-
-;     mov R3,#tmp1
-;     mov R4,#tmp2
-;     mov R5,#tmp3
-;     call mul_32bit ;tmp2 = ds18b20_temp_raw*25
-
-;     mov R5,#tmp1
-;     mov R6,#2
-;     call shr_32bit ;tmp2 = (ds18b20_temp_raw*25)>>2 = ds18b20_temp_raw*(25/4)
-;     call split_32bit
-;     ret
-
-;TODO comments
-; ds18b20_display:
-;     mov R1,#0
-;     mov R0,#10
-;     call lcd_gotoxy
-;     mov R3,#temp_out_string
-;     call lcd_string
-;     jf0 ds18b20_display_pos
-;     mov R0,#'-'
-;     mov R1,#1
-;     call lcd_write
-; ds18b20_display_pos:
-;     call ds18b20_value_to_digits
-;     mov R3,#4
-;     mov R4,#2
-;     call lcd_num
-;     mov R3,#deg_c_string
-;     call lcd_string
-;     ret
-
 
 ;======================== Memory operation routines ========================
 ;R0 - pointer to value to be zeroed, uses and corrupts R0,R6
@@ -1263,7 +1156,7 @@ div10_32bit:
 split_32bit:
     mov R7,#6
 split_32bit_loop:
-    call div10_32bit ;bmp280_temp_real = bmp280_temp_real/10, tmp3 = bmp280_temp_real%10
+    call div10_32bit ;[R5] = [R5]/10, tmp3 = [R5]%10 
     mov A,#tmp_buf_ascii ;Load pointer to result array to A
     add A,R7 ;Move pointer to proper position
     dec A ;Decrement 1 because array is indexed from 0 (n-th digit is at address+(n-1))
@@ -1274,31 +1167,6 @@ split_32bit_loop:
     mov @R0,A ;Load digit to array
     djnz R7,split_32bit_loop
     ret
-
-;======================== Delay routines ========================
-
-;~100uS delay, uses and corrupts R7
-delay_100us:
-	mov R7,#28
-delay_100us_loop:
-	djnz R7,delay_100us_loop
-	ret
-
-;~500uS delay, uses and corrupts R7
-delay_500us:
-	mov R7,#164
-delay_500us_loop:
-	djnz R7,delay_500us_loop
-	ret
-   
-;R6 - delay time in msec, uses and corrupts R6,R7
-delay_ms:
-	mov R7,#228
-delay_ms_loop:
-	nop
-	djnz R7,delay_ms_loop
-	djnz R6,delay_ms
-	ret
 
 ;======================== LCD routines ========================
 ;R0 - byte, R1 - cmd/data switch, uses R0,R1, corrupts nothing
@@ -1374,12 +1242,8 @@ lcd_init:
 	ret
 
 ;R1 - pointer to buffer, R2 - number of digits to display, R3 - decimal point position from end of number
-lcd_num: ;TODO add trailing zeros removal negative sign
-    mov A,R1
-    add A,#6 ;A = ascii_buf + 6
-    >sub A,R2 ;A = ascii_buf + 6 - R2
-    mov R1,A ;Load properly positioned pointer to R1
-    mov A,@R1 ;Load first digit to be displayed to A
+lcd_num:
+    mov A,@R1
     >sub A,#$30 ;A = A - 0x30 = A - '0'; check if first digit is '0'
     jnz lcd_num_loop ;If first digit is not '0', proceed to loop
     inc R1 ;Otherwise blank that zero - select next digit from buffer
@@ -1398,38 +1262,13 @@ lcd_num_skip_dp:
     djnz R2,lcd_num_loop
     ret
 
-hr_cntr_clear: ;TODO comments
-    clr A
-    mov R0,#hr_cntr_1
-    mov @R0,A
-    mov R0,#hr_cntr_2
-    mov @R0,A
-    ret
-
-update_hr_cntr:
-    mov R0,#hr_cntr_1 ;Load first counter address to R0
-    inc @R0 ;Increment counter value
-    mov A,@R0 ;Load counter value to A
-    >sub A,#hr_cntr_overflow_val
-    jnz hr_cntr_no_overflow ;Check if first counter overflown
-    mov @R0,A ;If overflown, clear it (A = 0 now, so just load it to the counter)
-    mov R0,#hr_cntr_2 ;Load second counter address to R0
-    inc @R0 ;Increment counter value
-    mov A,@R0 ;Load counter value to A
-    >sub A,#hr_cntr_overflow_val
-    jnz hr_cntr_no_overflow ;Check if second counter overflown
-    mov @R0,A ;If overflown, clear it (A = 0 now, so just load it to the counter)
-    clr F1 ;Set hour flag
-hr_cntr_no_overflow:
-    ret
-
-;     .ot
-; pressure_string .az /P:/
-; temp_in_string  .az /I:/
-; temp_out_string .az /O:/
-; humidity_string .az /H:/
-; hpa_string      .az /hPa/
-; deg_c_string    .az #$DF,/C /
+    .ot
+pres_string     .az /P:/
+temp_in_string  .az /I:/
+temp_out_string .az /O:/
+rh_string       .az /RH:/
+hpa_string      .az /hPa /
+deg_c_string    .az #$DF,/C /
 
 ;R3 - pointer to string in ROM
 lcd_string:
@@ -1444,4 +1283,102 @@ lcd_string_loop:
     inc R3 ;Move pointer to next char
     jmp lcd_string_loop ;Loop until end of the string
 lcd_string_end:
+    ret
+
+perform_meas:
+    call bmp280_read_meas
+    call bmp280_compute
+    call dht11_read_rh
+    call ds18b20_read_temp
+    ret
+
+display_meas: ;TODO comments
+    mov R1,#0
+    mov R0,#0
+    call lcd_gotoxy
+    mov R3,#temp_in_string
+    call lcd_string
+    mov R1,#bmp280_temp_ascii
+    mov R2,#4
+    mov R3,#2
+    call lcd_num
+    mov R3,#deg_c_string
+    call lcd_string
+
+    mov R3,#temp_out_string
+    call lcd_string
+    mov R1,#ds18b20_temp_ascii
+    mov A,@R1
+    >sub A,#'-'
+    jnz display_temp_out_pos
+    mov R0,#'-'
+    ; mov R1,#1
+    call lcd_write
+display_temp_out_pos:
+    inc R1 ;It's either additional zero or negative sign, skip
+    mov R2,#4
+    mov R3,#2
+    call lcd_num
+    mov R3,#deg_c_string
+    call lcd_string
+   
+    mov R1,#1
+    mov R0,#0
+    call lcd_gotoxy
+    mov R3,#pres_string
+    call lcd_string
+    mov R1,#bmp280_pres_ascii
+    mov R2,#6
+    mov R3,#2
+    call lcd_num
+    mov R3,#hpa_string
+    call lcd_string
+
+    mov R3,#rh_string
+    call lcd_string
+    mov R1,#dht11_rh_ascii
+    mov R2,#2
+    mov R3,#0
+    call lcd_num
+    mov R0,#'%'
+    mov R1,#1
+    call lcd_write   
+    ret
+
+send_meas:
+    mov R3,#esp_conn_start
+    call uart_string ;Send AT command to start connection
+    mov R6,#100
+    call delay_ms ;Wait for ESP to be ready TODO tune timings
+    mov R3,#esp_req_send
+    call uart_string ;Send AT command to request sending data
+    mov R6,#100
+    call delay_ms ;Wait for ESP to be ready TODO tune timings
+    
+    mov R3,#esp_req_part_1
+    call uart_string ;Send first part of request
+    mov R1,#bmp280_temp_ascii
+    mov R2,#4
+    call uart_num
+
+    mov R3,#esp_req_part_2
+    call uart_string ;Send second part of request
+    mov R1,#ds18b20_temp_ascii
+    mov R2,#5
+    call uart_num
+
+    mov R3,#esp_req_part_3
+    call uart_string ;Send third part of request
+    mov R1,#bmp280_pres_ascii
+    mov R2,#6
+    call uart_num
+
+    mov R3,#esp_req_part_4
+    call uart_string ;Send fourth part of request
+    mov R1,#dht11_rh_ascii
+    mov R2,#2
+    call uart_num
+
+    mov R3,#esp_req_end
+    call uart_string ;Finish the request
     ret
