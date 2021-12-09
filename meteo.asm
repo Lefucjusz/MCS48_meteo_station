@@ -1,7 +1,6 @@
 ;MAB8049H, 10.000MHz
 ;Gdansk 2021
 ;TODO add uses/corrupts
-;TODO check if result variables passed to mul are not double-zeroed
 ;TODO optimize register loads
 	.cr	8048
 	.tf	rom.bin,BIN
@@ -97,7 +96,7 @@ main:
 loop:
     call perform_meas
     call display_meas
-    call update_hr_cntr ;Update hour counter
+    call hr_cntr_update ;Update hour counter
     jf0 skip_meas_send ;If less than hour since last measurements sending to server, don't send
     call send_meas
 skip_meas_send:
@@ -105,21 +104,21 @@ skip_meas_send:
     call delay_ms
     mov R6,#250
     call delay_ms
-    mov R6,#141
-    call delay_ms ;Delays tuned to give display update ~1s
-    clr F0
-    cpl F0 ;Clear hour flag
+    mov R6,#139
+    call delay_ms ;Delays tuned to give display update ~1s and apply correction for 10 seconds waiting for connection
 	jmp loop
 
-
-   .ot
-esp_conn_start  .az /AT+CIPSTART="TCP","192.168.8.69",3000/,#$0D,#$0A
-esp_req_send    .az /AT+CIPSEND=152/,#$0D,#$0A
-esp_req_part_1  .az /POST /,#$2F,/api/,#$2F,/sensors/,#$2F,/full /,/HTTP/,#$2F,/1.1/,#$0D,#$0A,/Content-Length: 64/,#$0D,#$0A,/Content-Type: application/,#$2F,/json/,#$0D,#$0A,#$0D,#$0A,/{"name":"MCS48","Ti":"/
-esp_req_part_2  .az /","To":"/
-esp_req_part_3  .az /","P":"/
-esp_req_part_4  .az /","RH":"/
-esp_req_end     .az /"}/,#$0D,#$0A
+     .ot
+esp_host            .az /lowd.herokuapp.com/
+esp_conn_start_1    .az /AT+CIPSTART="TCP","/
+esp_conn_start_2    .az /",80/,#$0D,#$0A
+esp_req_send        .az /AT+CIPSEND=176/,#$0D,#$0A
+esp_req_part_1      .az /POST /,#$2F,/api/,#$2F,/sensors/,#$2F,/full /,/HTTP/,#$2F,/1.1/,#$0D,#$0A,/Host:/
+esp_req_part_2      .az #$0D,#$0A,/Content-Length:64/,#$0D,#$0A,/Content-Type:application/,#$2F,/json/,#$0D,#$0A,#$0D,#$0A,/{"name":"MCS48","Ti":"/
+esp_req_part_3      .az /","To":"/
+esp_req_part_4      .az /","P":"/
+esp_req_part_5      .az /","RH":"/
+esp_req_end         .az /"}/,#$0D,#$0A
 
 ;R3 - pointer to string in ROM
 uart_string:
@@ -132,15 +131,6 @@ uart_string:
     inc R3 ;Move pointer to next char
     jmp uart_string ;Loop until end of the string
 uart_string_end:
-    ret
-
-;R1 - pointer to buffer with digits, R2 - number of digits to send
-uart_num:
-    mov A,@R1
-    mov R0,A ;Load next digit to R0
-    call uart_write_byte
-    inc R1 ;Move pointer to next digit
-    djnz R2,uart_num
     ret
 
 ; R0 - byte to send, uses R0,R6,R7
@@ -163,6 +153,15 @@ uart_write_delay:
 	orl P1,#uart_tx_pin ;Set tx pin high - stop bit
 	call delay_100us
 	ret
+
+;R1 - pointer to buffer with digits, R2 - number of digits to send
+uart_num:
+    mov A,@R1
+    mov R0,A ;Load next digit to R0
+    call uart_write_byte
+    inc R1 ;Move pointer to next digit
+    djnz R2,uart_num
+    ret
 
 ;======================== Delay routines ========================
 
@@ -189,6 +188,18 @@ delay_ms_loop:
 	djnz R6,delay_ms
 	ret
 
+delay_10s:
+    mov R5,#94
+delay_10s_loop1:
+    mov R6,#180
+delay_10s_loop2:
+    mov R7,#196
+delay_10s_loop3:
+    djnz R7,delay_10s_loop3
+    djnz R6,delay_10s_loop2
+    djnz R5,delay_10s_loop1
+    ret
+
 ;TODO DESCRIPTION
 hr_cntr_clear: ;TODO comments
     clr A
@@ -198,7 +209,9 @@ hr_cntr_clear: ;TODO comments
     mov @R0,A
     ret
 
-update_hr_cntr:
+hr_cntr_update:
+    clr F0
+    cpl F0 ;Clear hour flag
     mov R0,#hr_cntr_1 ;Load first counter address to R0
     inc @R0 ;Increment counter value
     mov A,@R0 ;Load counter value to A
@@ -305,7 +318,6 @@ ow_read_loop:
 	mov R0,A ;~1.5us	
 	;Request read - 1-Wire pin >1us low
 	anl P1,#~ow_pin ;Clear 1-Wire pin; ~3us
-	nop ;Wait for ~1.5us TODO maybe this can be deleted
 	orl P1,#ow_pin ;Set 1-Wire pin; ~3us
 	;Read bit and complete 60us timeslot
 	in A,P1 ;Read P1; ~3us
@@ -724,14 +736,13 @@ bmp280_compute:
     mov R1,#tmp1
     call sub_32bit ;tmp4 = tmp4 - 1 to check if tmp4 == 0
     jnc bmp280_compute_not_zero ;If carry not set, tmp4 != 0
-    mov R0,#tmp5
-    call zero_mem ;tmp3 = 0
-    mov R5,#tmp5
-    call split_32bit ;Split 0 to digits to fill tmp_buf_ascii with zeroes
     mov R0,#bmp280_pres_ascii
-    mov R1,#tmp_buf_ascii
-    mov R7,#6
-    call copy_mem ;Set result to 0
+    mov R7,#6 ;Load loop counter
+    mov A,#$30 ;A = 0x30 = '0'
+bmp280_compute_clear_result:
+    mov @R0,A
+    inc R0
+    djnz R7,bmp280_compute_clear_result ;Set every digit of result to '0'
     ret ;Abort further steps to prevent division by 0; first exit point
 bmp280_compute_not_zero:
     mov R0,#tmp4
@@ -972,6 +983,7 @@ ds18b20_no_neg_sign:
 	ret	
 
 ;======================== Memory operation routines ========================
+
 ;R0 - pointer to value to be zeroed, uses and corrupts R0,R6
 zero_mem:
     clr A ;Clear A
@@ -1141,25 +1153,19 @@ div_32bit_continue:
 div_32bit_end:
     ret
 
-;R5 - pointer to variable to divide, uses R0,R1,R2,R3,R4,R5,R6, corrupts R0,R1,R2,R3,R4,R6
-div10_32bit:
+;R5 - pointer to value to be split (6 digits max), uses ALL registers, corrupts R0,R1,R2,R3,R4,R6,R7
+split_32bit:
+    mov R7,#6 ;Load loop counter
+    mov R3,#tmp3 ;R3 = tmp3
+    mov R4,#tmp2 ;R4 = tmp2
+split_32bit_loop:
     mov R0,#tmp2
     call zero_mem ;Clear tmp2
     mov R0,#tmp2
     mov @R0,#$0A ;tmp2 = 0x0A = 10
-    mov R3,#tmp3
-    mov R4,#tmp2
-    call div_32bit
-    ret
-
-;R5 - pointer to value to be split (6 digits max) uses ALL registers, corrupts R0,R1,R2,R3,R4,R6,R7
-split_32bit:
-    mov R7,#6
-split_32bit_loop:
-    call div10_32bit ;[R5] = [R5]/10, tmp3 = [R5]%10 
-    mov A,#tmp_buf_ascii ;Load pointer to result array to A
+    call div_32bit ;[R5] = [R5]/10, tmp3 = [R5]%10 
+    mov A,#tmp_buf_ascii-1 ;Load pointer to result array to A, decrement 1 because array is indexed from 0 (n-th digit is at address+(n-1))
     add A,R7 ;Move pointer to proper position
-    dec A ;Decrement 1 because array is indexed from 0 (n-th digit is at address+(n-1))
     mov R0,A ;Store address in R0
     mov R1,#tmp3 ;Load pointer to digit to R1
     mov A,@R1 ;Load digit
@@ -1220,25 +1226,14 @@ lcd_gotoxy_write:
 ;Uses and corrupts R0,R1,R6,R7	
 lcd_init:
 	mov R1,#0 ;Whole subroutine will be sending commands
-	mov R0,#$30	
-	call lcd_write ;Weird 4-bit init command first time...
-	mov R6,#5
-	call delay_ms ;Wait 5ms
-	mov R0,#$30
-	call lcd_write ;Weird repeated 4-bit init command second time...
-	mov R6,#1
-	call delay_ms ;Wait 1ms
-	mov R0,#$30
-	call lcd_write ;Weird repeated 4-bit init command third time...
 	mov R0,#$02
 	call lcd_write ;Init 4-bit mode
 	mov R0,#$28
-	call lcd_write ;2 lines, 5*8 matrix, 4-bit
+	call lcd_write ;2 lines, 5*8 font, 4-bit mode
 	mov R0,#$0C
-	call lcd_write ;Display on, cursor off
+	call lcd_write ;Display on, cursor off, blink off
 	mov R0,#$06
 	call lcd_write ;Autoincrement cursor position, text scroll off
-	call lcd_cls ;Clear screen
 	ret
 
 ;R1 - pointer to buffer, R2 - number of digits to display, R3 - decimal point position from end of number
@@ -1312,7 +1307,7 @@ display_meas: ;TODO comments
     >sub A,#'-'
     jnz display_temp_out_pos
     mov R0,#'-'
-    ; mov R1,#1
+    ; mov R1,#1 TODO
     call lcd_write
 display_temp_out_pos:
     inc R1 ;It's either additional zero or negative sign, skip
@@ -1346,35 +1341,42 @@ display_temp_out_pos:
     ret
 
 send_meas:
-    mov R3,#esp_conn_start
-    call uart_string ;Send AT command to start connection
-    mov R6,#100
-    call delay_ms ;Wait for ESP to be ready TODO tune timings
+    mov R3,#esp_conn_start_1
+    call uart_string ;Send first part of AT command to start connection
+    mov R3,#esp_host
+    call uart_string ;Send host name
+    mov R3,#esp_conn_start_2
+    call uart_string ;Send second part of AT command to start connection
+    call delay_10s ;Wait for ESP to be ready, such long time because Heroku sleeps app and some time is needed to wake it up
     mov R3,#esp_req_send
     call uart_string ;Send AT command to request sending data
     mov R6,#100
-    call delay_ms ;Wait for ESP to be ready TODO tune timings
+    call delay_ms ;Wait for ESP to be ready
     
     mov R3,#esp_req_part_1
     call uart_string ;Send first part of request
+    mov R3,#esp_host
+    call uart_string ;Send host name
+    mov R3,#esp_req_part_2
+    call uart_string ;Send second part of request
     mov R1,#bmp280_temp_ascii
     mov R2,#4
     call uart_num
 
-    mov R3,#esp_req_part_2
-    call uart_string ;Send second part of request
+    mov R3,#esp_req_part_3
+    call uart_string ;Send third part of request
     mov R1,#ds18b20_temp_ascii
     mov R2,#5
     call uart_num
 
-    mov R3,#esp_req_part_3
-    call uart_string ;Send third part of request
+    mov R3,#esp_req_part_4
+    call uart_string ;Send fourth part of request
     mov R1,#bmp280_pres_ascii
     mov R2,#6
     call uart_num
 
-    mov R3,#esp_req_part_4
-    call uart_string ;Send fourth part of request
+    mov R3,#esp_req_part_5
+    call uart_string ;Send fifth part of request
     mov R1,#dht11_rh_ascii
     mov R2,#2
     call uart_num
